@@ -1,0 +1,2 @@
+# gemini-srt-translator-gui
+
