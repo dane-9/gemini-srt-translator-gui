@@ -7,6 +7,23 @@ import re
 import argparse
 import time
 
+def is_compiled():
+    result = os.path.normcase(os.path.splitext(sys.argv[0])[1]) == '.exe'
+    return result
+
+def get_executable_path():
+    exe_path = os.path.abspath(sys.argv[0])
+    return exe_path
+
+def get_app_directory():
+    app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    return app_dir
+
+def get_resource_path(relative_path):
+    base_path = get_app_directory()
+    full_path = os.path.join(base_path, relative_path)
+    return full_path
+
 if "--run-gst-subprocess" not in sys.argv:
     from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -16,10 +33,13 @@ if "--run-gst-subprocess" not in sys.argv:
     )
     from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence
     from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QProcessEnvironment, QTimer, QItemSelectionModel
+else:
+    pass
 
 import gemini_srt_translator as gst
 
-CONFIG_FILE = "config.json"
+CONFIG_FILE = get_resource_path("config.json")
+
 DEFAULT_SETTINGS = {
     "gemini_api_key": "", "gemini_api_key2": "", "target_language": "Swedish",
     "model_name": "gemini-2.5-flash-preview-05-20", "output_file_naming_pattern": "{original_name}.{lang_code}.srt",
@@ -28,6 +48,7 @@ DEFAULT_SETTINGS = {
     "free_quota": True, "skip_upgrade": False, "use_colors": True, "progress_log": False, "thoughts_log": False,
     "temperature": 0.7, "top_p": 0.95, "top_k": 40, "streaming": True, "thinking": True, "thinking_budget": 2048,
 }
+
 LANGUAGES = {
     "Swedish": "Swedish", "English": "English", "Spanish": "Spanish", "French": "French",
     "German": "German", "Italian": "Italian", "Portuguese": "Portuguese", "Dutch": "Dutch",
@@ -35,6 +56,7 @@ LANGUAGES = {
     "Arabic": "Arabic", "Hindi": "Hindi", "Turkish": "Turkish", "Polish": "Polish",
     "Vietnamese": "Vietnamese", "Thai": "Thai", "Indonesian": "Indonesian", "Danish": "Danish",
 }
+
 SHORT_LANG_CODES = {
     "Swedish": "sv", "English": "en", "Spanish": "es", "French": "fr", "German": "de",
     "Italian": "it", "Portuguese": "pt", "Dutch": "nl", "Russian": "ru", "Japanese": "ja",
@@ -42,6 +64,7 @@ SHORT_LANG_CODES = {
     "Turkish": "tr", "Polish": "pl", "Vietnamese": "vi", "Thai": "th", "Indonesian": "id",
     "Danish": "da",
 }
+
 PROGRESS_RE = re.compile(r"Translating:\s*\|.*\|\s*(\d+)%\s*\(([^)]+)\)(.*)")
 THINKING_RE = re.compile(r"Thinking", re.IGNORECASE)
 PROCESSING_RE = re.compile(r"Processing", re.IGNORECASE)
@@ -72,7 +95,9 @@ def run_gst_translation_subprocess():
     parser.add_argument("--streaming", type=bool, help="Streaming")
     parser.add_argument("--thinking", type=bool, help="Thinking")
     parser.add_argument("--thinking_budget", type=int, help="Thinking budget")
+    
     args = parser.parse_args()
+    
     try:
         gst.gemini_api_key = args.api_key
         gst.target_language = args.target_language
@@ -98,6 +123,8 @@ def run_gst_translation_subprocess():
         gst.translate()
         sys.exit(0)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 if "--run-gst-subprocess" not in sys.argv:
@@ -253,18 +280,20 @@ if "--run-gst-subprocess" not in sys.argv:
             self.description = description
             self.process = None
             self.is_cancelled = False
-            self.script_path = os.path.abspath(__file__)
-        
+            
         def _generate_final_filename(self):
             original_basename = os.path.basename(self.input_file_path)
-            name_part, _ = os.path.splitext(original_basename)
+            name_part, ext = os.path.splitext(original_basename)
             target_lang_code = SHORT_LANG_CODES.get(self.target_lang_gst_value, self.target_lang_gst_value.lower())
             pattern = self.advanced_settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+            
             for code in SHORT_LANG_CODES.values():
                 if name_part.endswith(f".{code}"):
                     name_part = name_part[:-len(f".{code}")]
                     break
-            return pattern.format(original_name=name_part, lang_code=target_lang_code)
+            
+            final_name = pattern.format(original_name=name_part, lang_code=target_lang_code)
+            return final_name
         
         def _fix_newline_issues(self, file_path):
             try:
@@ -276,29 +305,32 @@ if "--run-gst-subprocess" not in sys.argv:
                     with open(file_path, 'w', encoding='utf-8') as f:
                         f.write(fixed_content)
                     return True
-                return False
-            except Exception:
+                else:
+                    return False
+            except Exception as e:
                 return False
         
         def _cleanup_progress_files(self):
-            subprocess_cwd = os.path.dirname(self.script_path)
+            subprocess_cwd = get_app_directory()
             original_input_dir = os.path.dirname(self.input_file_path)
             progress_file_pattern = f"{os.path.basename(self.input_file_path)}.progress"
+            
             for cleanup_dir in [subprocess_cwd, original_input_dir]:
                 progress_file_path = os.path.join(cleanup_dir, progress_file_pattern)
                 if os.path.exists(progress_file_path):
                     try:
                         os.remove(progress_file_path)
-                    except Exception:
+                    except Exception as e:
                         pass
         
         def _cleanup_translated_srt(self):
-            subprocess_cwd = os.path.dirname(self.script_path)
+            subprocess_cwd = get_app_directory()
             default_output_file_path = os.path.join(subprocess_cwd, DEFAULT_GST_OUTPUT_NAME)
+            
             if os.path.exists(default_output_file_path):
                 try:
                     os.remove(default_output_file_path)
-                except Exception:
+                except Exception as e:
                     pass
         
         @Slot()
@@ -308,7 +340,7 @@ if "--run-gst-subprocess" not in sys.argv:
                 return
             
             self.status_message.emit(self.task_index, "Preparing subprocess...")
-            subprocess_cwd = os.path.dirname(self.script_path)
+            subprocess_cwd = get_app_directory()
             default_output_file_path = os.path.join(subprocess_cwd, DEFAULT_GST_OUTPUT_NAME)
             
             if os.path.exists(default_output_file_path):
@@ -319,12 +351,22 @@ if "--run-gst-subprocess" not in sys.argv:
                     self.finished.emit(self.task_index, f"Error cleaning old output: {e}", False)
                     return
             
-            cmd = [
-                sys.executable, self.script_path, "--run-gst-subprocess",
+            executable_path = get_executable_path()
+            
+            if not os.path.exists(executable_path):
+                self.finished.emit(self.task_index, f"Executable not found: {executable_path}", False)
+                return
+            
+            if is_compiled():
+                cmd = [executable_path, "--run-gst-subprocess"]
+            else:
+                cmd = [sys.executable, executable_path, "--run-gst-subprocess"]
+            
+            cmd.extend([
                 "--api_key", self.api_key,
                 "--target_language", self.target_lang_gst_value,
                 "--input_file", self.input_file_path,
-            ]
+            ])
             
             if self.model_name:
                 cmd.extend(["--model_name", self.model_name])
@@ -373,14 +415,22 @@ if "--run-gst-subprocess" not in sys.argv:
                 env = os.environ.copy()
                 env["PYTHONIOENCODING"] = "utf-8"
                 env["PYTHONUNBUFFERED"] = "1"
+                
                 creationflags = 0
                 if os.name == 'nt': 
                     creationflags = subprocess.CREATE_NO_WINDOW
                 
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = subprocess.SW_HIDE
+                
                 self.process = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, cwd=subprocess_cwd, env=env, bufsize=1,
-                    creationflags=creationflags, encoding='utf-8', errors='replace'
+                    creationflags=creationflags, startupinfo=startupinfo,
+                    encoding='utf-8', errors='replace'
                 )
                 
                 found_completion_string = False
@@ -401,9 +451,6 @@ if "--run-gst-subprocess" not in sys.argv:
                                 break
                             
                             clean_line = strip_ansi_sequences(line).strip()
-                            if not clean_line:
-                                continue
-                            
                             if not clean_line or clean_line.isspace():
                                 continue
                                 
@@ -453,7 +500,7 @@ if "--run-gst-subprocess" not in sys.argv:
                                     self.progress_update.emit(self.task_index, last_known_percent, current_status_text)
                                     continue
                                 
-                    except ValueError:
+                    except ValueError as e:
                         pass
                 
                 if self.process.stderr:
@@ -461,11 +508,11 @@ if "--run-gst-subprocess" not in sys.argv:
                         stderr_data = self.process.stderr.read()
                         if stderr_data:
                             stderr_output.extend(stderr_data.strip().split('\n'))
-                    except ValueError:
+                    except ValueError as e:
                         pass
                 
                 try:
-                    return_code = self.process.wait(timeout=30)
+                    return_code = self.process.wait(timeout=600)
                 except subprocess.TimeoutExpired:
                     self.process.kill()
                     stderr_output.append("GST subprocess timed out and was killed.")
@@ -503,9 +550,10 @@ if "--run-gst-subprocess" not in sys.argv:
                         try:
                             if os.path.exists(final_path): 
                                 os.remove(final_path)
+                            
                             shutil.move(default_output_file_path, final_path)
                             self.finished.emit(self.task_index, f"Translated", True)
-                        except Exception as e_move: 
+                        except Exception as e_move:
                             self._cleanup_progress_files()
                             self.finished.emit(self.task_index, f"Error moving file: {e_move}", False)
                     else:
@@ -523,8 +571,9 @@ if "--run-gst-subprocess" not in sys.argv:
                     else: 
                         err_msg += " (No specific stderr from GST)"
                     self.finished.emit(self.task_index, err_msg, False)
-                    
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 self._cleanup_progress_files()
                 self._cleanup_translated_srt()
                 self.finished.emit(self.task_index, f"Subprocess worker error: {type(e).__name__} - {e}", False)
@@ -557,6 +606,7 @@ if "--run-gst-subprocess" not in sys.argv:
     class MainWindow(QMainWindow):
         def __init__(self):
             super().__init__()
+            
             self.setWindowTitle("Gemini SRT Translator")
             
             window_width = 1000
@@ -572,33 +622,35 @@ if "--run-gst-subprocess" not in sys.argv:
             
             self.move(x, y)
             
-            self.setWindowIcon(QIcon.fromTheme("applications-internet", QIcon("icons/app_icon.png")))
+            self.setWindowIcon(QIcon.fromTheme("applications-internet"))
             self.tasks = []
             self.current_task_index = -1
             self.settings = self._load_settings()
             self.active_thread = None
             self.active_worker = None
             self.clipboard_description = ""
+            
             central_widget = QWidget()
             self.setCentralWidget(central_widget)
             main_layout = QVBoxLayout(central_widget)
+            
             toolbar = QToolBar("Main Toolbar")
             self.addToolBar(toolbar)
-            add_action = QAction(QIcon.fromTheme("document-open", QIcon("icons/add_icon.png")), "Add Subtitles", self)
+            add_action = QAction(QIcon.fromTheme("document-open"), "Add Subtitles", self)
             add_action.triggered.connect(self.add_files_action)
             toolbar.addAction(add_action)
-            self.start_action = QAction(QIcon.fromTheme("media-playback-start", QIcon("icons/start_icon.png")), "Start Queue", self)
+            self.start_action = QAction(QIcon.fromTheme("media-playback-start"), "Start Queue", self)
             self.start_action.triggered.connect(self.start_translation_queue)
             toolbar.addAction(self.start_action)
-            self.stop_action = QAction(QIcon.fromTheme("media-playback-stop", QIcon("icons/stop_icon.png")), "Stop Current/Queue", self)
+            self.stop_action = QAction(QIcon.fromTheme("media-playback-stop"), "Stop Current/Queue", self)
             self.stop_action.triggered.connect(self.stop_translation_action)
             self.stop_action.setEnabled(False)
             toolbar.addAction(self.stop_action)
-            settings_action = QAction(QIcon.fromTheme("preferences-system", QIcon("icons/settings_icon.png")), "Settings", self)
+            settings_action = QAction(QIcon.fromTheme("preferences-system"), "Settings", self)
             settings_action.triggered.connect(self.open_settings_dialog)
             toolbar.addAction(settings_action)
             toolbar.addSeparator()
-            self.clear_action = QAction(QIcon.fromTheme("edit-clear", QIcon("icons/clear_icon.png")), "Clear Queue", self)
+            self.clear_action = QAction(QIcon.fromTheme("edit-clear"), "Clear Queue", self)
             self.clear_action.triggered.connect(self.clear_queue_action)
             self.clear_action.setEnabled(False)
             toolbar.addAction(self.clear_action)
@@ -674,6 +726,7 @@ if "--run-gst-subprocess" not in sys.argv:
             self.overall_progress_bar.setFormat("%p% - Current Task")
             self.overall_progress_bar.setVisible(False)
             main_layout.addWidget(self.overall_progress_bar)
+            
             self.update_button_states()
 
         def on_item_changed(self, item):
@@ -1090,8 +1143,11 @@ if "--run-gst-subprocess" not in sys.argv:
                         s = DEFAULT_SETTINGS.copy()
                         s.update(loaded_s)
                         return s
+                else:
+                    pass
             except Exception as e:
                 pass
+            
             return DEFAULT_SETTINGS.copy()
 
         def _save_settings(self):
@@ -1101,28 +1157,42 @@ if "--run-gst-subprocess" not in sys.argv:
                 self.settings["model_name"] = self.model_name_edit.text()
                 current_display_lang = self.target_lang_combo.currentText()
                 self.settings["target_language"] = LANGUAGES.get(current_display_lang, current_display_lang)
+                
+                config_dir = os.path.dirname(CONFIG_FILE)
+                if not os.path.exists(config_dir):
+                    os.makedirs(config_dir, exist_ok=True)
+                
                 with open(CONFIG_FILE, 'w') as f:
                     json.dump(self.settings, f, indent=4)
             except Exception as e:
                 QMessageBox.warning(self, "Save Settings Error", f"Could not save settings: {e}")
 
         def _cleanup_all_progress_files(self):
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            for file in os.listdir(script_dir):
-                if file.endswith('.progress'):
-                    try:
-                        os.remove(os.path.join(script_dir, file))
-                    except Exception:
-                        pass
+            script_dir = get_app_directory()
+            
+            try:
+                files = os.listdir(script_dir)
+                for file in files:
+                    if file.endswith('.progress'):
+                        file_path = os.path.join(script_dir, file)
+                        try:
+                            os.remove(file_path)
+                        except Exception as e:
+                            pass
+            except Exception as e:
+                pass
 
         def _cleanup_translated_srt_file(self):
-            script_dir = os.path.dirname(os.path.abspath(__file__))
+            script_dir = get_app_directory()
             default_output_file_path = os.path.join(script_dir, DEFAULT_GST_OUTPUT_NAME)
+            
             if os.path.exists(default_output_file_path):
                 try:
                     os.remove(default_output_file_path)
-                except Exception:
+                except Exception as e:
                     pass
+            else:
+                pass
 
         def closeEvent(self, event):
             self._save_settings()
@@ -1152,9 +1222,11 @@ if "--run-gst-subprocess" not in sys.argv:
             if files:
                 selected_target_lang_display = self.target_lang_combo.currentText()
                 selected_target_lang_value = LANGUAGES.get(selected_target_lang_display, selected_target_lang_display)
+                
                 for file_path in files:
                     if any(task['path'] == file_path and task['lang_value'] == selected_target_lang_value for task in self.tasks):
                         continue
+                        
                     path_item = QStandardItem(os.path.basename(file_path))
                     path_item.setToolTip(os.path.dirname(file_path))
                     path_item.setEditable(False)
@@ -1172,24 +1244,31 @@ if "--run-gst-subprocess" not in sys.argv:
                         "lang_display": selected_target_lang_display,
                         "lang_value": selected_target_lang_value, "worker": None, "thread": None
                     })
+                    
                 self.update_button_states()
+            else:
+                pass
 
         def start_translation_queue(self):
             if not self.api_key_edit.text().strip():
                 QMessageBox.warning(self, "API Key Missing", "Please enter your Gemini API Key.")
                 self.api_key_edit.setFocus()
                 return
+                
             if self.active_thread and self.active_thread.isRunning():
                 QMessageBox.information(self, "In Progress", "A translation is already in progress.")
                 return
+                
             first_queued_idx = -1
             for i, task_data in enumerate(self.tasks):
                 if task_data["status_item"].text() == "Queued":
                     first_queued_idx = i
                     break
+                    
             if first_queued_idx == -1:
                 QMessageBox.information(self, "Queue Status", "No subtitles in 'Queued' state.")
                 return
+                
             self.current_task_index = first_queued_idx
             self._process_task_at_index(self.current_task_index)
             self.update_button_states()
@@ -1198,16 +1277,19 @@ if "--run-gst-subprocess" not in sys.argv:
             if not (0 <= task_idx < len(self.tasks)):
                 self._handle_queue_finished()
                 return
+                
             task = self.tasks[task_idx]
             if task["status_item"].text() != "Queued":
                 self._find_and_process_next_queued_task()
                 return
+                
             self.current_task_index = task_idx
             task["status_item"].setText("Preparing...")
             self.overall_progress_bar.setVisible(True)
             self.overall_progress_bar.setValue(0)
             self.overall_progress_bar.setFormat("%p% - Current Task")
             self.stop_action.setEnabled(True)
+            
             self.active_worker = SubprocessWorker(
                 task_index=task_idx, input_file_path=task["path"], target_lang_gst_value=task["lang_value"],
                 api_key=self.api_key_edit.text().strip(), api_key2=self.api_key2_edit.text().strip(),
@@ -1231,6 +1313,7 @@ if "--run-gst-subprocess" not in sys.argv:
                 if self.tasks[i]["status_item"].text() == "Queued":
                     next_idx = i
                     break
+                    
             if next_idx != -1:
                 self._process_task_at_index(next_idx)
             else:
@@ -1261,16 +1344,20 @@ if "--run-gst-subprocess" not in sys.argv:
         def on_worker_finished(self, task_idx, message, success):
             if 0 <= task_idx < len(self.tasks):
                 self.tasks[task_idx]["status_item"].setText(message)
+                
             if self.active_thread and self.active_thread.isRunning():
                 self.active_thread.quit()
                 self.active_thread.wait(1000)
+                
             self.active_worker = None
             self.active_thread = None
             self.overall_progress_bar.setFormat("Error" if not success else "Completed")
+            
             if not success:
                 self.overall_progress_bar.setValue(0)
             else:
                 self.overall_progress_bar.setValue(100)
+                
             QTimer.singleShot(500, self._find_and_process_next_queued_task)
             self.update_button_states()
 
@@ -1310,6 +1397,7 @@ if "--run-gst-subprocess" not in sys.argv:
             if self.active_thread and self.active_thread.isRunning():
                 QMessageBox.warning(self, "Cannot Clear", "Translation in progress. Stop it before clearing.")
                 return
+                
             reply = QMessageBox.question(self, "Clear Queue", "Remove all items from queue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.Yes:
                 self.tasks.clear()
@@ -1351,4 +1439,5 @@ if __name__ == "__main__":
         app = QApplication(sys.argv)
         window = MainWindow()
         window.show()
-        sys.exit(app.exec())
+        exit_code = app.exec()
+        sys.exit(exit_code)
