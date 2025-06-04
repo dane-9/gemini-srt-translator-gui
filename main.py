@@ -348,14 +348,10 @@ if "--run-gst-subprocess" not in sys.argv:
                     cmd.extend(["--skip_upgrade", str(self.advanced_settings["skip_upgrade"])])
                 if self.advanced_settings.get("use_colors") is not None:
                     cmd.extend(["--use_colors", str(self.advanced_settings["use_colors"])])
-                # Only include progress_log if it's explicitly True
                 if self.advanced_settings.get("progress_log") is True:
                     cmd.extend(["--progress_log", str(self.advanced_settings["progress_log"])])
-                # Only include thoughts_log if it's explicitly True  
                 if self.advanced_settings.get("thoughts_log") is True:
                     cmd.extend(["--thoughts_log", str(self.advanced_settings["thoughts_log"])])
-                # Note: When checkboxes are False/unchecked, these parameters are completely 
-                # omitted from the command to prevent GST from interpreting their presence as enabling them
                     
             if self.advanced_settings.get("use_model_tuning", False):
                 if self.advanced_settings.get("temperature") is not None:
