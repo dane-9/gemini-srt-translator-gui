@@ -224,6 +224,40 @@ QSpinBox:focus, QDoubleSpinBox:focus {
     border-color: #555555;
 }
 
+QDoubleSpinBox::up-button, QSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 16px;
+    border-left: 1px solid #555;
+    background: #3a3a3a;
+    image: url("Files/arrow-up.svg");
+}
+
+QDoubleSpinBox::down-button, QSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 16px;
+    border-left: 1px solid #555;
+    background: #3a3a3a;
+    image: url("Files/arrow-down.svg");
+}
+
+QDoubleSpinBox::up-button:hover, QSpinBox::up-button:hover {
+    background: #4a4a4a;
+}
+
+QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover {
+    background: #4a4a4a;
+}
+
+QDoubleSpinBox::up-button:pressed, QSpinBox::up-button:pressed {
+    background: #2a2a2a;
+}
+
+QDoubleSpinBox::down-button:pressed, QSpinBox::down-button:pressed {
+    background: #2a2a2a;
+}
+
 QCheckBox {
     color: #A0A0A0;
 	margin-right: 2px;
