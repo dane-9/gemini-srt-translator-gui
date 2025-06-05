@@ -1,5 +1,8 @@
 **Gemini SRT Translator GUI** is a user-friendly graphical interface for the powerful [Gemini SRT Translator](https://github.com/MaKTaiL/gemini-srt-translator) library, built with PySide6.
 
+## User Interface
+<img src="https://i.imgur.com/OYBpLOb.png" alt="gui" width="700"/>
+
 ## Features
 
 - **Intuitive Interface** - Easy to use Interface with intuitive functionality
