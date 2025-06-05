@@ -29,10 +29,24 @@ if "--run-gst-subprocess" not in sys.argv:
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QPushButton, QTreeView, QLineEdit, QLabel, QFileDialog, QMessageBox,
         QComboBox, QGroupBox, QToolBar, QProgressBar, QDialog, QFormLayout,
-        QSpinBox, QDoubleSpinBox, QCheckBox, QDialogButtonBox, QMenu, QTextEdit
+        QSpinBox, QDoubleSpinBox, QCheckBox, QDialogButtonBox, QMenu, QTextEdit,
+        QToolButton, QSizePolicy, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect
     )
-    from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence
-    from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QProcessEnvironment, QTimer, QItemSelectionModel
+    from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont
+    from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QProcessEnvironment, QTimer, QItemSelectionModel, QRect, QPropertyAnimation, QEasingCurve
+    from pyqt_frameless_window import FramelessWidget
+    import qtawesome as qta
+    
+    def load_stylesheet():
+        try:
+            qss_file_path = get_resource_path("dark.qss")
+            with open(qss_file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except FileNotFoundError:
+            return ""
+        except Exception as e:
+            print(f"Error loading dark.qss: {e}")
+            return ""
 else:
     pass
 
@@ -128,12 +142,252 @@ def run_gst_translation_subprocess():
         sys.exit(1)
 
 if "--run-gst-subprocess" not in sys.argv:
-    class BulkDescriptionDialog(QDialog):
-        def __init__(self, current_text="", parent=None):
+    class DialogTitleBarWidget(QWidget):
+        def __init__(self, title="Dialog", parent=None):
             super().__init__(parent)
-            self.setWindowTitle("Bulk Edit Description")
+            self.parent_window = parent
+            self.setFixedHeight(30)
+            self.setObjectName("DialogTitleBar")
+            
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(15, 0, 0, 0)
+            layout.setSpacing(5)
+            
+            self.title_label = QLabel(title)
+            self.title_label.setObjectName("DialogTitle")
+            layout.addWidget(self.title_label)
+            
+            layout.addStretch()
+            
+            # Only close button for dialogs
+            self.close_btn = QToolButton()
+            self.close_btn.setObjectName("WindowCloseButton")
+            self.close_btn.setIcon(qta.icon('fa5s.times', color='#A0A0A0'))
+            self.close_btn.setFixedSize(30, 30)
+            self.close_btn.clicked.connect(self.close_window)
+            
+            self.close_btn_normal_icon = qta.icon('fa5s.times', color='#A0A0A0')
+            self.close_btn_hover_icon = qta.icon('fa5s.times', color='white')
+            
+            def on_close_btn_enter():
+                self.close_btn.setIcon(self.close_btn_hover_icon)
+                
+            def on_close_btn_leave():
+                self.close_btn.setIcon(self.close_btn_normal_icon)
+            
+            self.close_btn.enterEvent = lambda e: on_close_btn_enter()
+            self.close_btn.leaveEvent = lambda e: on_close_btn_leave()
+            
+            layout.addWidget(self.close_btn)
+            
+            # Window dragging
+            self.mouse_pressed = False
+            self.mouse_pos = None
+        
+        def set_title(self, title):
+            self.title_label.setText(title)
+        
+        def close_window(self):
+            if self.parent_window:
+                self.parent_window.close()
+        
+        def mousePressEvent(self, event):
+            if event.button() == Qt.LeftButton:
+                self.mouse_pressed = True
+                self.mouse_pos = event.globalPosition().toPoint()
+        
+        def mouseMoveEvent(self, event):
+            if self.mouse_pressed and self.mouse_pos and self.parent_window:
+                diff = event.globalPosition().toPoint() - self.mouse_pos
+                self.parent_window.move(self.parent_window.pos() + diff)
+                self.mouse_pos = event.globalPosition().toPoint()
+        
+        def mouseReleaseEvent(self, event):
+            if event.button() == Qt.LeftButton:
+                self.mouse_pressed = False
+                self.mouse_pos = None
+            
+    class CustomFramelessDialog(FramelessWidget):
+        def __init__(self, title="Dialog", parent=None):
+            super().__init__(hint=['close'])
+            
+            self.setWindowTitle(title)
+            self.setWindowModality(Qt.ApplicationModal)
+            
+            # Dialog result tracking
+            self._result = QDialog.Rejected
+            self._finished = False
+            
+            # Get the title bar and customize it
+            title_bar = self.getTitleBar()
+            title_bar.setTitleBarFont(QFont('Arial', 10))
+            title_bar.setIconSize(16, 16)
+            
+            # Create custom title bar widget (like main window)
+            self.custom_title_bar = DialogTitleBarWidget(title, self)
+            
+            # Replace the default title bar content
+            title_bar_layout = title_bar.layout()
+            if title_bar_layout:
+                # Clear existing widgets
+                while title_bar_layout.count():
+                    child = title_bar_layout.takeAt(0)
+                    if child.widget():
+                        child.widget().setParent(None)
+                # Add our custom title bar
+                title_bar_layout.addWidget(self.custom_title_bar)
+            
+            # Set up the main content area
+            self.content_widget = QWidget()
+            self.content_layout = QVBoxLayout(self.content_widget)
+            self.content_layout.setContentsMargins(10, 10, 10, 10)
+            
+            # Add content widget to the main layout
+            main_layout = self.layout()
+            main_layout.addWidget(self.content_widget)
+        
+        def showEvent(self, event):
+            super().showEvent(event)
+        
+        def set_title(self, title):
+            self.custom_title_bar.set_title(title)
+            self.setWindowTitle(title)
+        
+        def get_content_layout(self):
+            return self.content_layout
+        
+        # Dialog methods to mimic QDialog behavior
+        def accept(self):
+            self._result = QDialog.Accepted
+            self._finished = True
+            self.close()
+        
+        def reject(self):
+            self._result = QDialog.Rejected
+            self._finished = True
+            self.close()
+        
+        def done(self, result):
+            self._result = result
+            self._finished = True
+            self.close()
+        
+        def result(self):
+            return self._result
+        
+        def exec(self):
+            self._finished = False
+            self._result = QDialog.Rejected
+            
+            # Show the dialog
+            self.show()
+            
+            # Process events until dialog is finished
+            app = QApplication.instance()
+            while not self._finished and self.isVisible():
+                app.processEvents()
+                QThread.msleep(10)
+            
+            return self._result
+        
+        def closeEvent(self, event):
+            if not self._finished:
+                self.reject()
+            super().closeEvent(event)
+            
+    class CustomMessageBox(CustomFramelessDialog):
+        def __init__(self, icon_type, title, text, buttons=QMessageBox.Ok, parent=None):
+            super().__init__(title, parent)
+            self.setMinimumSize(300, 150)
+            self.result_value = QMessageBox.Cancel
+            
+            layout = self.get_content_layout()
+            
+            message_layout = QHBoxLayout()
+            
+            # Icon
+            icon_label = QLabel()
+            icon_size = 32
+            if icon_type == QMessageBox.Question:
+                icon_label.setPixmap(qta.icon('fa5s.question-circle', color='#2196F3').pixmap(icon_size, icon_size))
+            elif icon_type == QMessageBox.Warning:
+                icon_label.setPixmap(qta.icon('fa5s.exclamation-triangle', color='#FF9800').pixmap(icon_size, icon_size))
+            elif icon_type == QMessageBox.Critical:
+                icon_label.setPixmap(qta.icon('fa5s.times-circle', color='#F44336').pixmap(icon_size, icon_size))
+            elif icon_type == QMessageBox.Information:
+                icon_label.setPixmap(qta.icon('fa5s.info-circle', color='#2196F3').pixmap(icon_size, icon_size))
+            else:
+                icon_label.setPixmap(qta.icon('fa5s.info-circle', color='#2196F3').pixmap(icon_size, icon_size))
+            
+            icon_label.setAlignment(Qt.AlignTop)
+            icon_label.setFixedSize(icon_size + 10, icon_size + 10)
+            message_layout.addWidget(icon_label)
+            
+            # Text
+            text_label = QLabel(text)
+            text_label.setWordWrap(True)
+            text_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            text_label.setStyleSheet("font-size: 13px; color: #333; padding: 5px;")
+            message_layout.addWidget(text_label, 1)
+            
+            layout.addLayout(message_layout)
+            layout.addStretch()
+            
+            # Buttons
+            self.button_box = QDialogButtonBox()
+            
+            if buttons & QMessageBox.Ok:
+                ok_btn = self.button_box.addButton(QDialogButtonBox.Ok)
+                ok_btn.clicked.connect(lambda: self.done_with_result(QMessageBox.Ok))
+            
+            if buttons & QMessageBox.Cancel:
+                cancel_btn = self.button_box.addButton(QDialogButtonBox.Cancel)
+                cancel_btn.clicked.connect(lambda: self.done_with_result(QMessageBox.Cancel))
+            
+            if buttons & QMessageBox.Yes:
+                yes_btn = self.button_box.addButton(QDialogButtonBox.Yes)
+                yes_btn.clicked.connect(lambda: self.done_with_result(QMessageBox.Yes))
+            
+            if buttons & QMessageBox.No:
+                no_btn = self.button_box.addButton(QDialogButtonBox.No)
+                no_btn.clicked.connect(lambda: self.done_with_result(QMessageBox.No))
+            
+            layout.addWidget(self.button_box)
+        
+        def done_with_result(self, result):
+            self.result_value = result
+            self.accept()
+        
+        def exec(self):
+            super().exec()
+            return self.result_value
+        
+        @staticmethod
+        def question(parent, title, text, buttons=QMessageBox.Yes | QMessageBox.No, default_button=QMessageBox.No):
+            dialog = CustomMessageBox(QMessageBox.Question, title, text, buttons, parent)
+            return dialog.exec()
+        
+        @staticmethod
+        def warning(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok):
+            dialog = CustomMessageBox(QMessageBox.Warning, title, text, buttons, parent)
+            return dialog.exec()
+        
+        @staticmethod
+        def information(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok):
+            dialog = CustomMessageBox(QMessageBox.Information, title, text, buttons, parent)
+            return dialog.exec()
+        
+        @staticmethod
+        def critical(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok):
+            dialog = CustomMessageBox(QMessageBox.Critical, title, text, buttons, parent)
+            return dialog.exec()
+    
+    class BulkDescriptionDialog(CustomFramelessDialog):
+        def __init__(self, current_text="", parent=None):
+            super().__init__("Bulk Edit Description", parent)
             self.setMinimumSize(400, 200)
-            layout = QVBoxLayout(self)
+            
+            layout = self.get_content_layout()
             
             layout.addWidget(QLabel("Description:"))
             self.text_edit = QTextEdit()
@@ -147,15 +401,16 @@ if "--run-gst-subprocess" not in sys.argv:
         
         def get_description(self):
             return self.text_edit.toPlainText().strip()
-
-    class SettingsDialog(QDialog):
+    
+    class SettingsDialog(CustomFramelessDialog):
         def __init__(self, current_settings, parent=None):
-            super().__init__(parent)
-            self.setWindowTitle("Advanced Settings")
+            super().__init__("Advanced Settings", parent)
             self.setMinimumWidth(500)
             self.settings = current_settings.copy()
-            layout = QVBoxLayout(self)
             
+            layout = self.get_content_layout()
+            
+            # Basic Configuration
             basic_group = QGroupBox("Basic Configuration")
             basic_layout = QFormLayout()
             self.output_naming_pattern_edit = QLineEdit(self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt"))
@@ -163,6 +418,7 @@ if "--run-gst-subprocess" not in sys.argv:
             basic_group.setLayout(basic_layout)
             layout.addWidget(basic_group)
             
+            # GST Parameters
             self.gst_group = QGroupBox("GST Parameters")
             self.gst_group.setCheckable(True)
             self.gst_group.setChecked(self.settings.get("use_gst_parameters", False))
@@ -196,6 +452,7 @@ if "--run-gst-subprocess" not in sys.argv:
             self.gst_group.setLayout(gst_layout)
             layout.addWidget(self.gst_group)
             
+            # Model Tuning Parameters
             self.model_group = QGroupBox("Model Tuning Parameters")
             self.model_group.setCheckable(True)
             self.model_group.setChecked(self.settings.get("use_model_tuning", False))
@@ -228,6 +485,7 @@ if "--run-gst-subprocess" not in sys.argv:
             self.model_group.setLayout(model_layout)
             layout.addWidget(self.model_group)
             
+            # Buttons
             self.button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
             self.button_box.accepted.connect(self.accept)
             self.button_box.rejected.connect(self.reject)
@@ -603,9 +861,190 @@ if "--run-gst-subprocess" not in sys.argv:
                 except Exception as e:
                     pass
 
-    class MainWindow(QMainWindow):
+    class CustomTitleBarWidget(QWidget):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.parent_window = parent
+            self.setFixedHeight(40)
+            self.setObjectName("CustomTitleBar")
+            
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(10, 0, 0, 0)
+            layout.setSpacing(5)
+            
+            self.title_label = QLabel("Gemini SRT Translator")
+            self.title_label.setObjectName("AppTitle")
+            layout.addWidget(self.title_label)
+            
+            layout.addStretch()
+            
+            self.add_btn = QToolButton()
+            self.add_btn.setObjectName("TitleBarButton")
+            self.add_btn.setText("Add")
+            self.add_btn.setIcon(qta.icon('fa5s.plus', color='#A0A0A0'))
+            self.add_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            
+            self.start_btn = QToolButton()
+            self.start_btn.setObjectName("TitleBarButton")
+            self.start_btn.setText("Start")
+            self.start_btn.setIcon(qta.icon('fa5s.play', color='green'))
+            self.start_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            
+            self.stop_btn = QToolButton()
+            self.stop_btn.setObjectName("TitleBarButton")
+            self.stop_btn.setText("Stop")
+            self.stop_btn.setIcon(qta.icon('fa5s.stop', color='red'))
+            self.stop_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            self.stop_btn.setEnabled(False)
+            
+            self.settings_btn = QToolButton()
+            self.settings_btn.setObjectName("TitleBarButton")
+            self.settings_btn.setText("Settings")
+            self.settings_btn.setIcon(qta.icon('fa5s.cog', color='#A0A0A0'))
+            self.settings_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            
+            self.clear_btn = QToolButton()
+            self.clear_btn.setObjectName("TitleBarButton")
+            self.clear_btn.setText("Clear")
+            self.clear_btn.setIcon(qta.icon('fa5s.trash', color='#d32f2f'))
+            self.clear_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            self.clear_btn.setEnabled(False)
+            
+            layout.addWidget(self.add_btn)
+            layout.addWidget(self.start_btn)
+            layout.addWidget(self.stop_btn)
+            layout.addWidget(self.settings_btn)
+            layout.addWidget(self.clear_btn)
+            
+            separator = QFrame()
+            separator.setObjectName("TitleBarSeparator")
+            separator.setFrameShape(QFrame.VLine)
+            separator.setFrameShadow(QFrame.Sunken)
+            layout.addWidget(separator)
+            
+            window_controls_layout = QHBoxLayout()
+            window_controls_layout.setContentsMargins(0, 0, 0, 0)
+
+            
+            self.minimize_btn = QToolButton()
+            self.minimize_btn.setObjectName("WindowControlButton")
+            self.minimize_btn.setIcon(qta.icon('fa5s.window-minimize', color='#A0A0A0'))
+            self.minimize_btn.setFixedSize(40, 40)
+            self.minimize_btn.clicked.connect(self.minimize_window)
+            
+            self.maximize_btn = QToolButton()
+            self.maximize_btn.setObjectName("WindowControlButton")
+            self.maximize_btn.setIcon(qta.icon('fa5s.window-maximize', color='#A0A0A0'))
+            self.maximize_btn.setFixedSize(40, 40)
+            self.maximize_btn.clicked.connect(self.toggle_maximize)
+            
+            self.close_btn = QToolButton()
+            self.close_btn.setObjectName("WindowCloseButton")
+            self.close_btn.setIcon(qta.icon('fa5s.times', color='#A0A0A0'))
+            self.close_btn.setFixedSize(40, 40)
+            self.close_btn.clicked.connect(self.close_window)
+            
+            self.close_btn_normal_icon = qta.icon('fa5s.times', color='#A0A0A0')
+            self.close_btn_hover_icon = qta.icon('fa5s.times', color='white')
+            
+            def on_close_btn_enter():
+                self.close_btn.setIcon(self.close_btn_hover_icon)
+                
+            def on_close_btn_leave():
+                self.close_btn.setIcon(self.close_btn_normal_icon)
+            
+            self.close_btn.enterEvent = lambda e: on_close_btn_enter()
+            self.close_btn.leaveEvent = lambda e: on_close_btn_leave()
+            
+            window_controls_layout.addWidget(self.minimize_btn)
+            window_controls_layout.addWidget(self.maximize_btn)
+            window_controls_layout.addWidget(self.close_btn)
+            
+            window_controls_widget = QWidget()
+            window_controls_widget.setLayout(window_controls_layout)
+            layout.addWidget(window_controls_widget)
+            
+            self.mouse_pressed = False
+            self.mouse_pos = None
+            self.was_maximized = False
+            self.restore_geometry = None
+        
+        def minimize_window(self):
+            if self.parent_window:
+                self.parent_window.showMinimized()
+        
+        def toggle_maximize(self):
+            if self.parent_window:
+                if self.parent_window.isMaximized():
+                    self.parent_window.showNormal()
+                    self.maximize_btn.setIcon(qta.icon('fa5s.window-maximize', color='#666'))
+                else:
+                    self.restore_geometry = self.parent_window.geometry()
+                    self.parent_window.showMaximized()
+                    self.maximize_btn.setIcon(qta.icon('fa5s.window-restore', color='#666'))
+        
+        def close_window(self):
+            if self.parent_window:
+                self.parent_window.close()
+        
+        def mousePressEvent(self, event):
+            if event.button() == Qt.LeftButton:
+                self.mouse_pressed = True
+                self.mouse_pos = event.globalPosition().toPoint()
+                
+                if self.parent_window:
+                    self.was_maximized = self.parent_window.isMaximized()
+                    
+                    if self.was_maximized and not self.restore_geometry:
+                        screen = QApplication.primaryScreen().geometry()
+                        restore_width = int(screen.width() * 0.8)
+                        restore_height = int(screen.height() * 0.8)
+                        restore_x = (screen.width() - restore_width) // 2
+                        restore_y = (screen.height() - restore_height) // 2
+                        
+                        self.restore_geometry = QRect(restore_x, restore_y, restore_width, restore_height)
+        
+        def mouseMoveEvent(self, event):
+            if self.mouse_pressed and self.mouse_pos and self.parent_window:
+                current_pos = event.globalPosition().toPoint()
+                
+                if self.was_maximized:
+                    if self.restore_geometry:
+                        self.parent_window.setGeometry(self.restore_geometry)
+                    else:
+                        self.parent_window.showNormal()
+                    
+                    self.maximize_btn.setIcon(qta.icon('fa5s.window-maximize', color='#666'))
+                    
+                    title_bar_width = self.width()
+                    click_ratio = (self.mouse_pos.x() - self.parent_window.geometry().left()) / self.parent_window.width() if self.parent_window.width() > 0 else 0.5
+                    
+                    new_x = current_pos.x() - int(self.parent_window.width() * click_ratio)
+                    new_y = current_pos.y() - 20
+                    
+                    self.parent_window.move(new_x, new_y)
+                    
+                    self.mouse_pos = current_pos
+                    self.was_maximized = False
+                    
+                else:
+                    diff = current_pos - self.mouse_pos
+                    self.parent_window.move(self.parent_window.pos() + diff)
+                    self.mouse_pos = current_pos
+        
+        def mouseReleaseEvent(self, event):
+            if event.button() == Qt.LeftButton:
+                self.mouse_pressed = False
+                self.mouse_pos = None
+                self.was_maximized = False
+        
+        def mouseDoubleClickEvent(self, event):
+            if event.button() == Qt.LeftButton:
+                self.toggle_maximize()
+
+    class MainWindow(FramelessWidget):
         def __init__(self):
-            super().__init__()
+            super().__init__(hint=['min', 'max', 'close'])
             
             self.setWindowTitle("Gemini SRT Translator")
             
@@ -623,7 +1062,11 @@ if "--run-gst-subprocess" not in sys.argv:
             self.move(x, y)
             
             icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
-            self.setWindowIcon(QIcon(icon_path))
+            if os.path.exists(icon_path):
+                self.setWindowIcon(icon_path)
+            else:
+                pass
+            
             self.tasks = []
             self.current_task_index = -1
             self.settings = self._load_settings()
@@ -631,33 +1074,33 @@ if "--run-gst-subprocess" not in sys.argv:
             self.active_worker = None
             self.clipboard_description = ""
             
-            central_widget = QWidget()
-            self.setCentralWidget(central_widget)
-            main_layout = QVBoxLayout(central_widget)
+            title_bar = self.getTitleBar()
+            title_bar.setTitleBarFont(QFont('Arial', 12))
+            title_bar.setIconSize(24, 24)
             
-            toolbar = QToolBar("Main Toolbar")
-            self.addToolBar(toolbar)
-            add_action = QAction(QIcon.fromTheme("document-open"), "Add Subtitles", self)
-            add_action.triggered.connect(self.add_files_action)
-            toolbar.addAction(add_action)
-            self.start_action = QAction(QIcon.fromTheme("media-playback-start"), "Start Queue", self)
-            self.start_action.triggered.connect(self.start_translation_queue)
-            toolbar.addAction(self.start_action)
-            self.stop_action = QAction(QIcon.fromTheme("media-playback-stop"), "Stop Current/Queue", self)
-            self.stop_action.triggered.connect(self.stop_translation_action)
-            self.stop_action.setEnabled(False)
-            toolbar.addAction(self.stop_action)
-            settings_action = QAction(QIcon.fromTheme("preferences-system"), "Settings", self)
-            settings_action.triggered.connect(self.open_settings_dialog)
-            toolbar.addAction(settings_action)
-            toolbar.addSeparator()
-            self.clear_action = QAction(QIcon.fromTheme("edit-clear"), "Clear Queue", self)
-            self.clear_action.triggered.connect(self.clear_queue_action)
-            self.clear_action.setEnabled(False)
-            toolbar.addAction(self.clear_action)
+            self.custom_title_bar = CustomTitleBarWidget(self)
             
-            config_group = QGroupBox("Basic Configuration")
-            config_layout = QFormLayout(config_group)
+            title_bar_layout = title_bar.layout()
+            if title_bar_layout:
+                while title_bar_layout.count():
+                    child = title_bar_layout.takeAt(0)
+                    if child.widget():
+                        child.widget().setParent(None)
+                title_bar_layout.addWidget(self.custom_title_bar)
+            
+            self.custom_title_bar.add_btn.clicked.connect(self.add_files_action)
+            self.custom_title_bar.start_btn.clicked.connect(self.start_translation_queue)
+            self.custom_title_bar.stop_btn.clicked.connect(self.stop_translation_action)
+            self.custom_title_bar.settings_btn.clicked.connect(self.open_settings_dialog)
+            self.custom_title_bar.clear_btn.clicked.connect(self.clear_queue_action)
+            
+            main_layout = self.layout()
+            
+            content_widget = QWidget()
+            content_layout = QVBoxLayout(content_widget)
+            content_layout.setContentsMargins(10, 10, 10, 10)
+            
+            config_layout = QFormLayout()
             
             api_keys_layout = QHBoxLayout()
             self.api_key_edit = QLineEdit()
@@ -695,7 +1138,7 @@ if "--run-gst-subprocess" not in sys.argv:
             self.model_name_edit.textChanged.connect(lambda text: self.settings.update({"model_name": text}))
             config_layout.addRow("Model Name:", self.model_name_edit)
             
-            main_layout.addWidget(config_group)
+            content_layout.addLayout(config_layout)
             
             self.tree_view = QTreeView()
             self.tree_view.setAlternatingRowColors(True)
@@ -720,13 +1163,15 @@ if "--run-gst-subprocess" not in sys.argv:
             header = self.tree_view.header()
             header.sortIndicatorChanged.connect(self._on_sort_indicator_changed)
             
-            main_layout.addWidget(self.tree_view)
+            content_layout.addWidget(self.tree_view)
             
             self.overall_progress_bar = QProgressBar()
             self.overall_progress_bar.setTextVisible(True)
             self.overall_progress_bar.setFormat("%p% - Current Task")
             self.overall_progress_bar.setVisible(False)
-            main_layout.addWidget(self.overall_progress_bar)
+            content_layout.addWidget(self.overall_progress_bar)
+            
+            main_layout.addWidget(content_widget)
             
             self.update_button_states()
 
@@ -759,8 +1204,8 @@ if "--run-gst-subprocess" not in sys.argv:
 
         def _on_sort_indicator_changed(self, logical_index, order):
             if self.active_thread and self.active_thread.isRunning():
-                QMessageBox.warning(self, "Cannot Sort", 
-                              "Translation in progress. Stop it before sorting.")
+                CustomMessageBox.warning(self, "Cannot Sort", 
+                                  "Translation in progress. Stop it before sorting.")
                 self.tree_view.setSortingEnabled(False)
                 self._rebuild_model_from_tasks()
                 self.tree_view.setSortingEnabled(True)
@@ -1160,7 +1605,17 @@ if "--run-gst-subprocess" not in sys.argv:
                 with open(CONFIG_FILE, 'w') as f:
                     json.dump(self.settings, f, indent=4)
             except Exception as e:
-                QMessageBox.warning(self, "Save Settings Error", f"Could not save settings: {e}")
+                CustomMessageBox.warning(self, "Save Settings Error", f"Could not save settings: {e}")
+                
+        def center_dialog_on_parent(dialog, parent):
+            if parent:
+                parent_geometry = parent.geometry()
+                dialog_size = dialog.size()
+                
+                x = parent_geometry.x() + (parent_geometry.width() - dialog_size.width()) // 2
+                y = parent_geometry.y() + (parent_geometry.height() - dialog_size.height()) // 2
+                
+                dialog.move(x, y)
 
         def _cleanup_all_progress_files(self):
             script_dir = get_app_directory()
@@ -1192,11 +1647,11 @@ if "--run-gst-subprocess" not in sys.argv:
         def closeEvent(self, event):
             self._save_settings()
             if self.active_thread and self.active_thread.isRunning():
-                reply = QMessageBox.question(self, 'Confirm Exit', "Translation in progress. Stop and exit?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                reply = CustomMessageBox.question(self, 'Confirm Exit', "Translation in progress. Stop and exit?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
                 if reply == QMessageBox.Yes:
                     self.stop_translation_action(force_quit=True)
                     if self.active_thread and not self.active_thread.wait(3000):
-                        QMessageBox.warning(self, "Exiting", "Thread did not stop gracefully. Forcing exit.")
+                        CustomMessageBox.warning(self, "Exiting", "Thread did not stop gracefully. Forcing exit.")
                         if self.active_worker and self.active_worker.process:
                              try:
                                  self.active_worker.process.kill()
@@ -1246,12 +1701,12 @@ if "--run-gst-subprocess" not in sys.argv:
 
         def start_translation_queue(self):
             if not self.api_key_edit.text().strip():
-                QMessageBox.warning(self, "API Key Missing", "Please enter your Gemini API Key.")
+                CustomMessageBox.warning(self, "API Key Missing", "Please enter your Gemini API Key.")
                 self.api_key_edit.setFocus()
                 return
                 
             if self.active_thread and self.active_thread.isRunning():
-                QMessageBox.information(self, "In Progress", "A translation is already in progress.")
+                CustomMessageBox.information(self, "In Progress", "A translation is already in progress.")
                 return
                 
             first_queued_idx = -1
@@ -1261,7 +1716,7 @@ if "--run-gst-subprocess" not in sys.argv:
                     break
                     
             if first_queued_idx == -1:
-                QMessageBox.information(self, "Queue Status", "No subtitles in 'Queued' state.")
+                CustomMessageBox.information(self, "Queue Status", "No subtitles in 'Queued' state.")
                 return
                 
             self.current_task_index = first_queued_idx
@@ -1283,7 +1738,7 @@ if "--run-gst-subprocess" not in sys.argv:
             self.overall_progress_bar.setVisible(True)
             self.overall_progress_bar.setValue(0)
             self.overall_progress_bar.setFormat("%p% - Current Task")
-            self.stop_action.setEnabled(True)
+            self.custom_title_bar.stop_btn.setEnabled(True)
             
             self.active_worker = SubprocessWorker(
                 task_index=task_idx, input_file_path=task["path"], target_lang_gst_value=task["lang_value"],
@@ -1372,7 +1827,7 @@ if "--run-gst-subprocess" not in sys.argv:
                     self._cleanup_all_progress_files()
                     self._cleanup_translated_srt_file()
                 else:
-                    QMessageBox.information(self, "Stop", "No active translation to stop.")
+                    CustomMessageBox.information(self, "Stop", "No active translation to stop.")
                     
             if not force_quit:
                 stopped_any_queued = False
@@ -1386,13 +1841,13 @@ if "--run-gst-subprocess" not in sys.argv:
                 if not self.active_worker:
                     self._find_and_process_next_queued_task()
             self.update_button_states()
-
+        
         @Slot()
         def clear_queue_action(self):
             if self.active_thread and self.active_thread.isRunning():
                 return
                 
-            reply = QMessageBox.question(self, "Clear Queue", "Remove all items from queue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            reply = CustomMessageBox.question(self, "Clear Queue", "Remove all items from queue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.Yes:
                 self.tasks.clear()
                 self.model.removeRows(0, self.model.rowCount())
@@ -1416,20 +1871,21 @@ if "--run-gst-subprocess" not in sys.argv:
             has_api_key = bool(self.api_key_edit.text().strip())
             
             start_enabled = has_queued_tasks and not is_processing and has_api_key
-            self.start_action.setEnabled(start_enabled)
+            self.custom_title_bar.start_btn.setEnabled(start_enabled)
             
             if start_enabled:
-                self.stop_action.setEnabled(False)
+                self.custom_title_bar.stop_btn.setEnabled(False)
             else:
-                self.stop_action.setEnabled(is_processing or has_queued_tasks)
+                self.custom_title_bar.stop_btn.setEnabled(is_processing or has_queued_tasks)
             
-            self.clear_action.setEnabled(has_any_tasks and not is_processing)
+            self.custom_title_bar.clear_btn.setEnabled(has_any_tasks and not is_processing)
 
 if __name__ == "__main__":
     if "--run-gst-subprocess" in sys.argv:
         run_gst_translation_subprocess()
     else:
         app = QApplication(sys.argv)
+        app.setStyleSheet(load_stylesheet())
         window = MainWindow()
         window.show()
         exit_code = app.exec()
