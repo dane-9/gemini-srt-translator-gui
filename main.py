@@ -24,18 +24,51 @@ def get_resource_path(relative_path):
     full_path = os.path.join(base_path, relative_path)
     return full_path
 
+def load_colored_svg(svg_path, color="#A0A0A0"):
+    try:
+        with open(svg_path, 'r', encoding='utf-8') as f:
+            svg_content = f.read()
+
+        svg_content = re.sub(r'<path\s+d=', f'<path fill="{color}" d=', svg_content)
+
+        svg_content = re.sub(r'<path\s+fill="[^"]*"\s+d=', f'<path fill="{color}" d=', svg_content)
+
+        svg_bytes = svg_content.encode('utf-8')
+        pixmap = QPixmap()
+        pixmap.loadFromData(svg_bytes, 'SVG')
+
+        return QIcon(pixmap)
+
+    except Exception as e:
+        print(f"Error loading SVG {svg_path}: {e}")
+        return QIcon()
+
+def create_button_icons(svg_path, normal_color="#A0A0A0", hover_color="white", disabled_color="#444444"):
+    icon = QIcon()
+
+    normal_pixmap = load_colored_svg(svg_path, normal_color).pixmap(16, 16)
+    icon.addPixmap(normal_pixmap, QIcon.Normal, QIcon.Off)
+
+    hover_pixmap = load_colored_svg(svg_path, hover_color).pixmap(16, 16)
+    icon.addPixmap(hover_pixmap, QIcon.Active, QIcon.Off)
+
+    disabled_pixmap = load_colored_svg(svg_path, disabled_color).pixmap(16, 16)
+    icon.addPixmap(disabled_pixmap, QIcon.Disabled, QIcon.Off)
+
+    return icon
+
 if "--run-gst-subprocess" not in sys.argv:
     from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QPushButton, QTreeView, QLineEdit, QLabel, QFileDialog, QMessageBox,
         QComboBox, QGroupBox, QToolBar, QProgressBar, QDialog, QFormLayout,
         QSpinBox, QDoubleSpinBox, QCheckBox, QDialogButtonBox, QMenu, QTextEdit,
-        QToolButton, QSizePolicy, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect
+        QToolButton, QSizePolicy, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
+        QStackedWidget, QStyle
     )
-    from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont
+    from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap
     from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QProcessEnvironment, QTimer, QItemSelectionModel, QRect, QPropertyAnimation, QEasingCurve
     from pyqt_frameless_window import FramelessWidget
-    import qtawesome as qta
     
     def load_stylesheet():
         try:
@@ -159,28 +192,17 @@ if "--run-gst-subprocess" not in sys.argv:
             
             layout.addStretch()
             
-            # Only close button for dialogs
             self.close_btn = QToolButton()
             self.close_btn.setObjectName("WindowCloseButton")
-            self.close_btn.setIcon(qta.icon('fa5s.times', color='#A0A0A0'))
+            self.close_btn.setIcon(QIcon(get_resource_path("Files/window-close.svg")))
             self.close_btn.setFixedSize(30, 30)
             self.close_btn.clicked.connect(self.close_window)
             
-            self.close_btn_normal_icon = qta.icon('fa5s.times', color='#A0A0A0')
-            self.close_btn_hover_icon = qta.icon('fa5s.times', color='white')
-            
-            def on_close_btn_enter():
-                self.close_btn.setIcon(self.close_btn_hover_icon)
-                
-            def on_close_btn_leave():
-                self.close_btn.setIcon(self.close_btn_normal_icon)
-            
-            self.close_btn.enterEvent = lambda e: on_close_btn_enter()
-            self.close_btn.leaveEvent = lambda e: on_close_btn_leave()
+            self.close_btn_normal_icon = QIcon(get_resource_path("Files/window-close.svg"))
+            self.close_btn_hover_icon = QIcon(get_resource_path("Files/window-close.svg"))
             
             layout.addWidget(self.close_btn)
             
-            # Window dragging
             self.mouse_pressed = False
             self.mouse_pos = None
         
@@ -214,35 +236,31 @@ if "--run-gst-subprocess" not in sys.argv:
             self.setWindowTitle(title)
             self.setWindowModality(Qt.ApplicationModal)
             
-            # Dialog result tracking
             self._result = QDialog.Rejected
             self._finished = False
             
-            # Get the title bar and customize it
             title_bar = self.getTitleBar()
             title_bar.setTitleBarFont(QFont('Arial', 10))
             title_bar.setIconSize(16, 16)
             
-            # Create custom title bar widget (like main window)
             self.custom_title_bar = DialogTitleBarWidget(title, self)
             
-            # Replace the default title bar content
             title_bar_layout = title_bar.layout()
             if title_bar_layout:
-                # Clear existing widgets
+
                 while title_bar_layout.count():
                     child = title_bar_layout.takeAt(0)
                     if child.widget():
                         child.widget().setParent(None)
-                # Add our custom title bar
+
                 title_bar_layout.addWidget(self.custom_title_bar)
             
-            # Set up the main content area
+
             self.content_widget = QWidget()
             self.content_layout = QVBoxLayout(self.content_widget)
             self.content_layout.setContentsMargins(10, 10, 10, 10)
             
-            # Add content widget to the main layout
+
             main_layout = self.layout()
             main_layout.addWidget(self.content_widget)
         
@@ -256,7 +274,7 @@ if "--run-gst-subprocess" not in sys.argv:
         def get_content_layout(self):
             return self.content_layout
         
-        # Dialog methods to mimic QDialog behavior
+
         def accept(self):
             self._result = QDialog.Accepted
             self._finished = True
@@ -279,10 +297,10 @@ if "--run-gst-subprocess" not in sys.argv:
             self._finished = False
             self._result = QDialog.Rejected
             
-            # Show the dialog
+
             self.show()
             
-            # Process events until dialog is finished
+
             app = QApplication.instance()
             while not self._finished and self.isVisible():
                 app.processEvents()
@@ -305,25 +323,25 @@ if "--run-gst-subprocess" not in sys.argv:
             
             message_layout = QHBoxLayout()
             
-            # Icon
             icon_label = QLabel()
             icon_size = 32
+            style = QApplication.style()
+            
             if icon_type == QMessageBox.Question:
-                icon_label.setPixmap(qta.icon('fa5s.question-circle', color='#2196F3').pixmap(icon_size, icon_size))
+                icon_label.setPixmap(style.standardIcon(QStyle.SP_MessageBoxQuestion).pixmap(icon_size, icon_size))
             elif icon_type == QMessageBox.Warning:
-                icon_label.setPixmap(qta.icon('fa5s.exclamation-triangle', color='#FF9800').pixmap(icon_size, icon_size))
+                icon_label.setPixmap(style.standardIcon(QStyle.SP_MessageBoxWarning).pixmap(icon_size, icon_size))
             elif icon_type == QMessageBox.Critical:
-                icon_label.setPixmap(qta.icon('fa5s.times-circle', color='#F44336').pixmap(icon_size, icon_size))
+                icon_label.setPixmap(style.standardIcon(QStyle.SP_MessageBoxCritical).pixmap(icon_size, icon_size))
             elif icon_type == QMessageBox.Information:
-                icon_label.setPixmap(qta.icon('fa5s.info-circle', color='#2196F3').pixmap(icon_size, icon_size))
+                icon_label.setPixmap(style.standardIcon(QStyle.SP_MessageBoxInformation).pixmap(icon_size, icon_size))
             else:
-                icon_label.setPixmap(qta.icon('fa5s.info-circle', color='#2196F3').pixmap(icon_size, icon_size))
+                icon_label.setPixmap(style.standardIcon(QStyle.SP_MessageBoxInformation).pixmap(icon_size, icon_size))
             
             icon_label.setAlignment(Qt.AlignTop)
             icon_label.setFixedSize(icon_size + 10, icon_size + 10)
             message_layout.addWidget(icon_label)
             
-            # Text
             text_label = QLabel(text)
             text_label.setWordWrap(True)
             text_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -333,7 +351,6 @@ if "--run-gst-subprocess" not in sys.argv:
             layout.addLayout(message_layout)
             layout.addStretch()
             
-            # Buttons
             self.button_box = QDialogButtonBox()
             
             if buttons & QMessageBox.Ok:
@@ -403,120 +420,278 @@ if "--run-gst-subprocess" not in sys.argv:
     class SettingsDialog(CustomFramelessDialog):
         def __init__(self, current_settings, parent=None):
             super().__init__("Advanced Settings", parent)
-            self.setMinimumWidth(500)
+            self.setMinimumSize(600, 500)
             self.settings = current_settings.copy()
             
             layout = self.get_content_layout()
             
-            # Basic Configuration
-            basic_group = QGroupBox("Basic Configuration")
-            basic_layout = QFormLayout()
-            self.output_naming_pattern_edit = QLineEdit(self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt"))
-            basic_layout.addRow("Output Naming Pattern:", self.output_naming_pattern_edit)
-            basic_group.setLayout(basic_layout)
-            layout.addWidget(basic_group)
+            main_layout = QHBoxLayout()
             
-            # GST Parameters
-            self.gst_group = QGroupBox("GST Parameters")
-            self.gst_group.setCheckable(True)
-            self.gst_group.setChecked(self.settings.get("use_gst_parameters", False))
-            self.gst_group.toggled.connect(self.toggle_gst_settings)
-            gst_layout = QFormLayout()
+            self.category_tree = QTreeView()
+            self.category_tree.setHeaderHidden(True)
+            self.category_tree.setMinimumWidth(150)
+            self.category_tree.setMaximumWidth(200)
+            self.category_tree.setRootIsDecorated(False)
+            
+            self.tree_model = QStandardItemModel()
+            
+            basic_item = QStandardItem("Basic Configuration")
+            basic_item.setIcon(load_colored_svg(get_resource_path("Files/cog-box.svg"), "#A0A0A0"))
+            basic_item.setEditable(False)
+            
+            gst_item = QStandardItem("GST Parameters")
+            gst_item.setIcon(load_colored_svg(get_resource_path("Files/gst-params.svg"), "#A0A0A0"))
+            gst_item.setEditable(False)
+            
+            model_item = QStandardItem("Model Tuning")
+            model_item.setIcon(load_colored_svg(get_resource_path("Files/model-tuning.svg"), "#A0A0A0"))
+            model_item.setEditable(False)
+            
+            self.tree_model.appendRow(basic_item)
+            self.tree_model.appendRow(gst_item)
+            self.tree_model.appendRow(model_item)
+            
+            self.category_tree.setModel(self.tree_model)
+            self.category_tree.selectionModel().currentChanged.connect(self.on_category_changed)
+            
+            main_layout.addWidget(self.category_tree)
+            
+            self.pages_widget = QStackedWidget()
+            
+            self.basic_page = self._build_basic_page()
+            self.gst_page = self._build_gst_page()
+            self.model_page = self._build_model_page()
+            
+            self.pages_widget.addWidget(self.basic_page)     # index 0
+            self.pages_widget.addWidget(self.gst_page)       # index 1
+            self.pages_widget.addWidget(self.model_page)     # index 2
+            
+            main_layout.addWidget(self.pages_widget)
+            layout.addLayout(main_layout)
+            
+            buttons_layout = QHBoxLayout()
+            
+            self.reset_defaults_btn = QPushButton("Reset to Default")
+            self.reset_defaults_btn.clicked.connect(self.reset_defaults)
+            buttons_layout.addWidget(self.reset_defaults_btn)
+            
+            buttons_layout.addStretch()
+            
+            self.button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+            self.button_box.accepted.connect(self.accept)
+            self.button_box.rejected.connect(self.reject)
+            buttons_layout.addWidget(self.button_box)
+            
+            layout.addLayout(buttons_layout)
+            
+            self.category_tree.setCurrentIndex(self.tree_model.index(0, 0))
+            self.pages_widget.setCurrentIndex(0)
+        
+        def _build_basic_page(self):
+            page = QWidget()
+            main_layout = QVBoxLayout(page)
+            
+            form_layout = QFormLayout()
+            form_layout.setVerticalSpacing(15)
+            
+            self.output_naming_pattern_edit = QLineEdit(self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt"))
+            form_layout.addRow("Output Naming Pattern:", self.output_naming_pattern_edit)
+            
+            main_layout.addLayout(form_layout)
+            main_layout.addStretch()
+            return page
+        
+        def _build_gst_page(self):
+            page = QWidget()
+            layout = QVBoxLayout(page)
+            layout.setSpacing(15)
+            
+            self.gst_checkbox = QCheckBox("Enable GST Parameters")
+            self.gst_checkbox.setChecked(self.settings.get("use_gst_parameters", False))
+            self.gst_checkbox.stateChanged.connect(self.toggle_gst_settings)
+            layout.addWidget(self.gst_checkbox)
+            
+            self.gst_content_widget = QWidget()
+            gst_layout = QFormLayout(self.gst_content_widget)
+            gst_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+            gst_layout.setVerticalSpacing(10)
+            
             self.output_file_edit = QLineEdit(self.settings.get("output_file", ""))
             gst_layout.addRow("Output File:", self.output_file_edit)
+            
             self.start_line_spin = QSpinBox()
             self.start_line_spin.setRange(1, 999999)
             self.start_line_spin.setValue(self.settings.get("start_line", 1))
+            self.start_line_spin.setMaximumWidth(150)
             gst_layout.addRow("Start Line:", self.start_line_spin)
+            
             self.batch_size_spin = QSpinBox()
             self.batch_size_spin.setRange(1, 10000)
             self.batch_size_spin.setValue(self.settings.get("batch_size", 300))
+            self.batch_size_spin.setMaximumWidth(150)
             gst_layout.addRow("Batch Size:", self.batch_size_spin)
-            self.free_quota_checkbox = QCheckBox()
-            self.free_quota_checkbox.setChecked(self.settings.get("free_quota", True))
-            gst_layout.addRow("Free Quota:", self.free_quota_checkbox)
-            self.skip_upgrade_checkbox = QCheckBox()
-            self.skip_upgrade_checkbox.setChecked(self.settings.get("skip_upgrade", False))
-            gst_layout.addRow("Skip Upgrade:", self.skip_upgrade_checkbox)
-            self.use_colors_checkbox = QCheckBox()
-            self.use_colors_checkbox.setChecked(self.settings.get("use_colors", True))
-            gst_layout.addRow("Use Colors:", self.use_colors_checkbox)
-            self.progress_log_checkbox = QCheckBox()
-            self.progress_log_checkbox.setChecked(self.settings.get("progress_log", False))
-            gst_layout.addRow("Progress Log:", self.progress_log_checkbox)
-            self.thoughts_log_checkbox = QCheckBox()
-            self.thoughts_log_checkbox.setChecked(self.settings.get("thoughts_log", False))
-            gst_layout.addRow("Thoughts Log:", self.thoughts_log_checkbox)
-            self.gst_group.setLayout(gst_layout)
-            layout.addWidget(self.gst_group)
             
-            # Model Tuning Parameters
-            self.model_group = QGroupBox("Model Tuning Parameters")
-            self.model_group.setCheckable(True)
-            self.model_group.setChecked(self.settings.get("use_model_tuning", False))
-            self.model_group.toggled.connect(self.toggle_model_settings)
-            model_layout = QFormLayout()
+            checkbox_items = [
+                ("free_quota", "Free Quota:", True),
+                ("skip_upgrade", "Skip Upgrade:", False),
+                ("use_colors", "Use Colors:", True),
+                ("progress_log", "Progress Log:", False),
+                ("thoughts_log", "Thoughts Log:", False)
+            ]
+            
+            self.gst_checkboxes = {}
+            for setting_key, label_text, default_value in checkbox_items:
+                checkbox = QCheckBox()
+                checkbox.setChecked(self.settings.get(setting_key, default_value))
+                self.gst_checkboxes[setting_key] = checkbox
+                gst_layout.addRow(label_text, checkbox)
+            
+            layout.addWidget(self.gst_content_widget)
+            layout.addStretch()
+            
+            self.toggle_gst_settings(self.gst_checkbox.isChecked())
+            
+            return page
+        
+        def _build_model_page(self):
+            page = QWidget()
+            layout = QVBoxLayout(page)
+            layout.setSpacing(15)
+            
+            self.model_checkbox = QCheckBox("Enable Model Tuning Parameters")
+            self.model_checkbox.setChecked(self.settings.get("use_model_tuning", False))
+            self.model_checkbox.stateChanged.connect(self.toggle_model_settings)
+            layout.addWidget(self.model_checkbox)
+            
+            self.model_content_widget = QWidget()
+            model_layout = QFormLayout(self.model_content_widget)
+            model_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+            model_layout.setVerticalSpacing(10)
+            
             self.temperature_spin = QDoubleSpinBox()
             self.temperature_spin.setRange(0.0, 2.0)
             self.temperature_spin.setSingleStep(0.1)
             self.temperature_spin.setValue(self.settings.get("temperature", 0.7))
+            self.temperature_spin.setDecimals(1)
+            self.temperature_spin.setMaximumWidth(150)
             model_layout.addRow("Temperature:", self.temperature_spin)
+            
             self.top_p_spin = QDoubleSpinBox()
             self.top_p_spin.setRange(0.0, 1.0)
             self.top_p_spin.setSingleStep(0.1)
             self.top_p_spin.setValue(self.settings.get("top_p", 0.95))
+            self.top_p_spin.setDecimals(2)
+            self.top_p_spin.setMaximumWidth(150)
             model_layout.addRow("Top P:", self.top_p_spin)
+            
             self.top_k_spin = QSpinBox()
             self.top_k_spin.setRange(0, 1000)
             self.top_k_spin.setValue(self.settings.get("top_k", 40))
+            self.top_k_spin.setMaximumWidth(150)
             model_layout.addRow("Top K:", self.top_k_spin)
-            self.streaming_checkbox = QCheckBox()
-            self.streaming_checkbox.setChecked(self.settings.get("streaming", True))
-            model_layout.addRow("Streaming:", self.streaming_checkbox)
-            self.thinking_checkbox = QCheckBox()
-            self.thinking_checkbox.setChecked(self.settings.get("thinking", True))
-            model_layout.addRow("Thinking:", self.thinking_checkbox)
+            
+            model_checkbox_items = [
+                ("streaming", "Streaming:", True),
+                ("thinking", "Thinking:", True)
+            ]
+            
+            self.model_checkboxes = {}
+            for setting_key, label_text, default_value in model_checkbox_items:
+                checkbox = QCheckBox()
+                checkbox.setChecked(self.settings.get(setting_key, default_value))
+                self.model_checkboxes[setting_key] = checkbox
+                model_layout.addRow(label_text, checkbox)
+            
             self.thinking_budget_spin = QSpinBox()
             self.thinking_budget_spin.setRange(0, 24576)
             self.thinking_budget_spin.setValue(self.settings.get("thinking_budget", 2048))
+            self.thinking_budget_spin.setMaximumWidth(150)
             model_layout.addRow("Thinking Budget:", self.thinking_budget_spin)
-            self.model_group.setLayout(model_layout)
-            layout.addWidget(self.model_group)
             
-            # Buttons
-            self.button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-            self.button_box.accepted.connect(self.accept)
-            self.button_box.rejected.connect(self.reject)
-            layout.addWidget(self.button_box)
+            layout.addWidget(self.model_content_widget)
+            layout.addStretch()
             
-            self.toggle_gst_settings(self.gst_group.isChecked())
-            self.toggle_model_settings(self.model_group.isChecked())
+            self.toggle_model_settings(self.model_checkbox.isChecked())
+            
+            return page
+        
+        def on_category_changed(self, current, previous):
+            if current.isValid():
+                row = current.row()
+                self.pages_widget.setCurrentIndex(row)
         
         def toggle_gst_settings(self, enabled):
-            pass
+            self.gst_content_widget.setEnabled(enabled)
+            if not enabled:
+                self.gst_content_widget.setStyleSheet("color: grey;")
+            else:
+                self.gst_content_widget.setStyleSheet("")
         
         def toggle_model_settings(self, enabled):
-            pass
+            self.model_content_widget.setEnabled(enabled)
+            if not enabled:
+                self.model_content_widget.setStyleSheet("color: grey;")
+            else:
+                self.model_content_widget.setStyleSheet("")
+        
+        def reset_defaults(self):
+            self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
+            
+            self.gst_checkbox.setChecked(False)
+            self.output_file_edit.setText("")
+            self.start_line_spin.setValue(1)
+            self.batch_size_spin.setValue(300)
+            
+            gst_defaults = {
+                "free_quota": True,
+                "skip_upgrade": False,
+                "use_colors": True,
+                "progress_log": False,
+                "thoughts_log": False
+            }
+            for key, default_val in gst_defaults.items():
+                if key in self.gst_checkboxes:
+                    self.gst_checkboxes[key].setChecked(default_val)
+            
+            self.model_checkbox.setChecked(False)
+            self.temperature_spin.setValue(0.7)
+            self.top_p_spin.setValue(0.95)
+            self.top_k_spin.setValue(40)
+            self.thinking_budget_spin.setValue(2048)
+            
+            model_defaults = {
+                "streaming": True,
+                "thinking": True
+            }
+            for key, default_val in model_defaults.items():
+                if key in self.model_checkboxes:
+                    self.model_checkboxes[key].setChecked(default_val)
+            
+            self.toggle_gst_settings(False)
+            self.toggle_model_settings(False)
         
         def get_settings(self):
-            s = self.settings
-            s["use_gst_parameters"] = self.gst_group.isChecked()
-            s["use_model_tuning"] = self.model_group.isChecked()
+            s = self.settings.copy()
+            
             s["output_file_naming_pattern"] = self.output_naming_pattern_edit.text().strip()
+            
+            s["use_gst_parameters"] = self.gst_checkbox.isChecked()
             s["output_file"] = self.output_file_edit.text().strip()
             s["start_line"] = self.start_line_spin.value()
             s["batch_size"] = self.batch_size_spin.value()
-            s["free_quota"] = self.free_quota_checkbox.isChecked()
-            s["skip_upgrade"] = self.skip_upgrade_checkbox.isChecked()
-            s["use_colors"] = self.use_colors_checkbox.isChecked()
-            s["progress_log"] = self.progress_log_checkbox.isChecked()
-            s["thoughts_log"] = self.thoughts_log_checkbox.isChecked()
+            
+            for key, checkbox in self.gst_checkboxes.items():
+                s[key] = checkbox.isChecked()
+            
+            s["use_model_tuning"] = self.model_checkbox.isChecked()
             s["temperature"] = self.temperature_spin.value()
             s["top_p"] = self.top_p_spin.value()
             s["top_k"] = self.top_k_spin.value()
-            s["streaming"] = self.streaming_checkbox.isChecked()
-            s["thinking"] = self.thinking_checkbox.isChecked()
             s["thinking_budget"] = self.thinking_budget_spin.value()
+            
+            for key, checkbox in self.model_checkboxes.items():
+                s[key] = checkbox.isChecked()
+            
             return s
 
     class SubprocessWorker(QObject):
@@ -879,32 +1054,32 @@ if "--run-gst-subprocess" not in sys.argv:
             self.add_btn = QToolButton()
             self.add_btn.setObjectName("TitleBarButton")
             self.add_btn.setText("Add")
-            self.add_btn.setIcon(qta.icon('fa5s.plus', color='#A0A0A0'))
+            self.add_btn.setIcon(create_button_icons(get_resource_path("Files/add.svg")))
             self.add_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             
             self.start_btn = QToolButton()
             self.start_btn.setObjectName("TitleBarButton")
             self.start_btn.setText("Start")
-            self.start_btn.setIcon(qta.icon('fa5s.play', color='green'))
+            self.start_btn.setIcon(create_button_icons(get_resource_path("Files/start.svg"), normal_color="#A0A0A0", hover_color="green"))
             self.start_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             
             self.stop_btn = QToolButton()
             self.stop_btn.setObjectName("TitleBarButton")
             self.stop_btn.setText("Stop")
-            self.stop_btn.setIcon(qta.icon('fa5s.stop', color='red'))
+            self.stop_btn.setIcon(create_button_icons(get_resource_path("Files/stop.svg"), normal_color="#A0A0A0", hover_color="red"))
             self.stop_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.stop_btn.setEnabled(False)
             
             self.settings_btn = QToolButton()
             self.settings_btn.setObjectName("TitleBarButton")
             self.settings_btn.setText("Settings")
-            self.settings_btn.setIcon(qta.icon('fa5s.cog', color='#A0A0A0'))
+            self.settings_btn.setIcon(create_button_icons(get_resource_path("Files/cog.svg")))
             self.settings_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             
             self.clear_btn = QToolButton()
             self.clear_btn.setObjectName("TitleBarButton")
             self.clear_btn.setText("Clear")
-            self.clear_btn.setIcon(qta.icon('fa5s.trash', color='#d32f2f'))
+            self.clear_btn.setIcon(create_button_icons(get_resource_path("Files/clear.svg"), normal_color="#A0A0A0", hover_color="#d32f2f"))
             self.clear_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.clear_btn.setEnabled(False)
             
@@ -926,33 +1101,24 @@ if "--run-gst-subprocess" not in sys.argv:
             
             self.minimize_btn = QToolButton()
             self.minimize_btn.setObjectName("WindowControlButton")
-            self.minimize_btn.setIcon(qta.icon('fa5s.window-minimize', color='#A0A0A0'))
+            self.minimize_btn.setIcon(create_button_icons(get_resource_path("Files/window-minimize.svg")))
             self.minimize_btn.setFixedSize(40, 40)
             self.minimize_btn.clicked.connect(self.minimize_window)
             
             self.maximize_btn = QToolButton()
             self.maximize_btn.setObjectName("WindowControlButton")
-            self.maximize_btn.setIcon(qta.icon('fa5s.window-maximize', color='#A0A0A0'))
+            self.maximize_btn.setIcon(create_button_icons(get_resource_path("Files/window-maximize.svg")))
             self.maximize_btn.setFixedSize(40, 40)
             self.maximize_btn.clicked.connect(self.toggle_maximize)
             
             self.close_btn = QToolButton()
             self.close_btn.setObjectName("WindowCloseButton")
-            self.close_btn.setIcon(qta.icon('fa5s.times', color='#A0A0A0'))
+            self.close_btn.setIcon(create_button_icons(get_resource_path("Files/window-close.svg"), normal_color="#A0A0A0", hover_color="white"))
             self.close_btn.setFixedSize(40, 40)
             self.close_btn.clicked.connect(self.close_window)
             
-            self.close_btn_normal_icon = qta.icon('fa5s.times', color='#A0A0A0')
-            self.close_btn_hover_icon = qta.icon('fa5s.times', color='white')
-            
-            def on_close_btn_enter():
-                self.close_btn.setIcon(self.close_btn_hover_icon)
-                
-            def on_close_btn_leave():
-                self.close_btn.setIcon(self.close_btn_normal_icon)
-            
-            self.close_btn.enterEvent = lambda e: on_close_btn_enter()
-            self.close_btn.leaveEvent = lambda e: on_close_btn_leave()
+            self.maximize_normal_icon = create_button_icons(get_resource_path("Files/window-maximize.svg"))
+            self.restore_normal_icon = create_button_icons(get_resource_path("Files/window-restore.svg"))
             
             window_controls_layout.addWidget(self.minimize_btn)
             window_controls_layout.addWidget(self.maximize_btn)
@@ -975,11 +1141,11 @@ if "--run-gst-subprocess" not in sys.argv:
             if self.parent_window:
                 if self.parent_window.isMaximized():
                     self.parent_window.showNormal()
-                    self.maximize_btn.setIcon(qta.icon('fa5s.window-maximize', color='#666'))
+                    self.maximize_btn.setIcon(self.maximize_normal_icon)
                 else:
                     self.restore_geometry = self.parent_window.geometry()
                     self.parent_window.showMaximized()
-                    self.maximize_btn.setIcon(qta.icon('fa5s.window-restore', color='#666'))
+                    self.maximize_btn.setIcon(self.restore_normal_icon)
         
         def close_window(self):
             if self.parent_window:
