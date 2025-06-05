@@ -2,14 +2,12 @@
 
 ## Features
 
-- **Batch Processing** - Add multiple SRT files and process them in sequence
-- **Visual Queue Management** - Drag, drop, sort, and manage translation jobs
+- **Intuitive Interface** - Easy to use Interface with intuitive functionality
+- **Batch Processing** - Add multiple SRT files and process them in sequence from multiple directories at once. SRTs will be renamed and moved back to the source directory
+- **Queue Management** - Use right-click context menu to reorder, reset, or remove files
 - **Real-time Progress** - Live progress bars and status updates
 - **Full GST Integration** - Access to all advanced GST parameters and model tuning
-- **Context Management** - Add descriptions and copy/paste between files
-- **Smart Resume** - Automatically continues to next file after completion
-- **Modern Interface** - Clean, intuitive design with keyboard shortcuts
-- **Persistent Settings** - All configurations saved automatically
+- **Easy Context Management** - Easily apply one description to multiple in queue
 
 ## Installation
 
@@ -21,18 +19,26 @@
 
 **That's it!** No Python installation, no dependencies, no setup required. Everything is bundled in the executable.
 
-### Alternative: Run from Source
+### Alternative: Run from Source (in Virtual Environment)
 
 If you prefer to run from source code:
-
+```bash
+python -m venv venv
+```
+```bash
+# On Windows:
+venv\Scripts\activate
+# On macOS/Linux:
+source venv/bin/activate
+```
+```bash
+pip install PySide6 gemini-srt-translator
+```
 ```bash
 git clone https://github.com/dane-9/gemini-srt-translator-gui.git
 ```
 ```bash
 cd gemini-srt-translator-gui
-```
-```bash
-pip install PySide6 gemini-srt-translator
 ```
 ```bash
 python main.py
@@ -58,11 +64,11 @@ python main.py
 
 ### File Output
 
-Translated files are saved in the same directory as the source files with the naming pattern:
-
+Translated files are saved in the same directory as the source files with the naming pattern chosen:
+{lang_code} is in accordance with ISO-639-1
 ```
-original_file.sv.srt  # Swedish translation
-original_file.fr.srt  # French translation
+original_file.sv.srt  # Swedish lang_code translation
+original_file.fr.srt  # French lang_code translation
 ```
 
 ## Advanced Configuration
