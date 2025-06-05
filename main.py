@@ -1252,7 +1252,9 @@ if "--run-gst-subprocess" not in sys.argv:
                     else:
                         self.parent_window.showNormal()
                     
-                    self.maximize_btn.setIcon(qta.icon('fa5s.window-maximize', color='#666'))
+                    self.maximize_btn.normal_icon = self.maximize_normal_icon
+                    self.maximize_btn.hover_icon = self.maximize_hover_icon
+                    self.maximize_btn.setIcon(self.maximize_normal_icon)
                     
                     title_bar_width = self.width()
                     click_ratio = (self.mouse_pos.x() - self.parent_window.geometry().left()) / self.parent_window.width() if self.parent_window.width() > 0 else 0.5
