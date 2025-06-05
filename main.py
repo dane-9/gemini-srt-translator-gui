@@ -982,7 +982,6 @@ if "--run-gst-subprocess" not in sys.argv:
 
         def move_selected_to_top(self):
             if self.active_thread and self.active_thread.isRunning():
-                QMessageBox.warning(self, "Cannot Move", "Translation in progress. Stop it before moving items.")
                 return
                 
             selected_indexes = self.tree_view.selectionModel().selectedRows()
@@ -1011,7 +1010,6 @@ if "--run-gst-subprocess" not in sys.argv:
 
         def move_selected_up(self):
             if self.active_thread and self.active_thread.isRunning():
-                QMessageBox.warning(self, "Cannot Move", "Translation in progress. Stop it before moving items.")
                 return
                 
             selected_indexes = self.tree_view.selectionModel().selectedRows()
@@ -1039,7 +1037,6 @@ if "--run-gst-subprocess" not in sys.argv:
 
         def move_selected_down(self):
             if self.active_thread and self.active_thread.isRunning():
-                QMessageBox.warning(self, "Cannot Move", "Translation in progress. Stop it before moving items.")
                 return
                 
             selected_indexes = self.tree_view.selectionModel().selectedRows()
@@ -1067,7 +1064,6 @@ if "--run-gst-subprocess" not in sys.argv:
 
         def move_selected_to_bottom(self):
             if self.active_thread and self.active_thread.isRunning():
-                QMessageBox.warning(self, "Cannot Move", "Translation in progress. Stop it before moving items.")
                 return
                 
             selected_indexes = self.tree_view.selectionModel().selectedRows()
@@ -1099,7 +1095,6 @@ if "--run-gst-subprocess" not in sys.argv:
 
         def remove_selected_items(self):
             if self.active_thread and self.active_thread.isRunning():
-                QMessageBox.warning(self, "Cannot Remove", "Translation in progress. Stop it before removing items.")
                 return
                 
             selected_indexes = self.tree_view.selectionModel().selectedRows()
@@ -1117,7 +1112,6 @@ if "--run-gst-subprocess" not in sys.argv:
 
         def reset_selected_status(self):
             if self.active_thread and self.active_thread.isRunning():
-                QMessageBox.warning(self, "Cannot Reset", "Translation in progress. Stop it before resetting status.")
                 return
                 
             selected_indexes = self.tree_view.selectionModel().selectedRows()
@@ -1396,7 +1390,6 @@ if "--run-gst-subprocess" not in sys.argv:
         @Slot()
         def clear_queue_action(self):
             if self.active_thread and self.active_thread.isRunning():
-                QMessageBox.warning(self, "Cannot Clear", "Translation in progress. Stop it before clearing.")
                 return
                 
             reply = QMessageBox.question(self, "Clear Queue", "Remove all items from queue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -1415,7 +1408,6 @@ if "--run-gst-subprocess" not in sys.argv:
             if dialog.exec():
                 self.settings.update(dialog.get_settings())
                 self._save_settings()
-                QMessageBox.information(self, "Settings Saved", "Advanced settings updated and saved.")
 
         def update_button_states(self):
             has_queued_tasks = any(task["status_item"].text() == "Queued" for task in self.tasks)
