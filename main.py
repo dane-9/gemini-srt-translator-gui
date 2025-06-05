@@ -388,8 +388,6 @@ if "--run-gst-subprocess" not in sys.argv:
             self.setMinimumSize(400, 200)
             
             layout = self.get_content_layout()
-            
-            layout.addWidget(QLabel("Description:"))
             self.text_edit = QTextEdit()
             self.text_edit.setPlainText(current_text)
             layout.addWidget(self.text_edit)
