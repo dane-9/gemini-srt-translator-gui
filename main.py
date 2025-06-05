@@ -192,14 +192,14 @@ if "--run-gst-subprocess" not in sys.argv:
             
             layout.addStretch()
             
-            self.close_btn = QToolButton()
+            self.close_btn = HoverToolButton(
+                get_resource_path("Files/window-close.svg"),
+                normal_color="#A0A0A0",
+                hover_color="white"
+            )
             self.close_btn.setObjectName("WindowCloseButton")
-            self.close_btn.setIcon(QIcon(get_resource_path("Files/window-close.svg")))
             self.close_btn.setFixedSize(30, 30)
             self.close_btn.clicked.connect(self.close_window)
-            
-            self.close_btn_normal_icon = QIcon(get_resource_path("Files/window-close.svg"))
-            self.close_btn_hover_icon = QIcon(get_resource_path("Files/window-close.svg"))
             
             layout.addWidget(self.close_btn)
             
@@ -228,6 +228,68 @@ if "--run-gst-subprocess" not in sys.argv:
             if event.button() == Qt.LeftButton:
                 self.mouse_pressed = False
                 self.mouse_pos = None
+                
+    class HoverToolButton(QToolButton):
+        def __init__(self, svg_path, normal_color="#A0A0A0", hover_color="white", disabled_color="#444444", parent=None):
+            super().__init__(parent)
+            self.svg_path = svg_path
+            self.normal_color = normal_color
+            self.hover_color = hover_color
+            self.disabled_color = disabled_color
+            
+            self.normal_icon = load_colored_svg(svg_path, normal_color)
+            self.hover_icon = load_colored_svg(svg_path, hover_color)
+            self.disabled_icon = load_colored_svg(svg_path, disabled_color)
+            
+            self.setIcon(self.normal_icon)
+            
+        def enterEvent(self, event):
+            if self.isEnabled():
+                self.setIcon(self.hover_icon)
+            super().enterEvent(event)
+            
+        def leaveEvent(self, event):
+            if self.isEnabled():
+                self.setIcon(self.normal_icon)
+            super().leaveEvent(event)
+            
+        def setEnabled(self, enabled):
+            super().setEnabled(enabled)
+            if enabled:
+                self.setIcon(self.normal_icon)
+            else:
+                self.setIcon(self.disabled_icon)
+    
+    class HoverPushButton(QPushButton):
+        def __init__(self, svg_path, normal_color="#A0A0A0", hover_color="white", disabled_color="#444444", parent=None):
+            super().__init__(parent)
+            self.svg_path = svg_path
+            self.normal_color = normal_color
+            self.hover_color = hover_color
+            self.disabled_color = disabled_color
+            
+            self.normal_icon = load_colored_svg(svg_path, normal_color)
+            self.hover_icon = load_colored_svg(svg_path, hover_color)
+            self.disabled_icon = load_colored_svg(svg_path, disabled_color)
+            
+            self.setIcon(self.normal_icon)
+            
+        def enterEvent(self, event):
+            if self.isEnabled():
+                self.setIcon(self.hover_icon)
+            super().enterEvent(event)
+            
+        def leaveEvent(self, event):
+            if self.isEnabled():
+                self.setIcon(self.normal_icon)
+            super().leaveEvent(event)
+            
+        def setEnabled(self, enabled):
+            super().setEnabled(enabled)
+            if enabled:
+                self.setIcon(self.normal_icon)
+            else:
+                self.setIcon(self.disabled_icon)
             
     class CustomFramelessDialog(FramelessWidget):
         def __init__(self, title="Dialog", parent=None):
@@ -255,12 +317,10 @@ if "--run-gst-subprocess" not in sys.argv:
 
                 title_bar_layout.addWidget(self.custom_title_bar)
             
-
             self.content_widget = QWidget()
             self.content_layout = QVBoxLayout(self.content_widget)
             self.content_layout.setContentsMargins(10, 10, 10, 10)
             
-
             main_layout = self.layout()
             main_layout.addWidget(self.content_widget)
         
@@ -274,7 +334,6 @@ if "--run-gst-subprocess" not in sys.argv:
         def get_content_layout(self):
             return self.content_layout
         
-
         def accept(self):
             self._result = QDialog.Accepted
             self._finished = True
@@ -1051,35 +1110,42 @@ if "--run-gst-subprocess" not in sys.argv:
             
             layout.addStretch()
             
-            self.add_btn = QToolButton()
+            self.add_btn = HoverToolButton(get_resource_path("Files/add.svg"))
             self.add_btn.setObjectName("TitleBarButton")
             self.add_btn.setText("Add")
-            self.add_btn.setIcon(create_button_icons(get_resource_path("Files/add.svg")))
             self.add_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             
-            self.start_btn = QToolButton()
+            self.start_btn = HoverToolButton(
+                get_resource_path("Files/start.svg"), 
+                normal_color="#A0A0A0", 
+                hover_color="green"
+            )
             self.start_btn.setObjectName("TitleBarButton")
             self.start_btn.setText("Start")
-            self.start_btn.setIcon(create_button_icons(get_resource_path("Files/start.svg"), normal_color="#A0A0A0", hover_color="green"))
             self.start_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             
-            self.stop_btn = QToolButton()
+            self.stop_btn = HoverToolButton(
+                get_resource_path("Files/stop.svg"), 
+                normal_color="#A0A0A0", 
+                hover_color="red"
+            )
             self.stop_btn.setObjectName("TitleBarButton")
             self.stop_btn.setText("Stop")
-            self.stop_btn.setIcon(create_button_icons(get_resource_path("Files/stop.svg"), normal_color="#A0A0A0", hover_color="red"))
             self.stop_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.stop_btn.setEnabled(False)
             
-            self.settings_btn = QToolButton()
+            self.settings_btn = HoverToolButton(get_resource_path("Files/cog.svg"))
             self.settings_btn.setObjectName("TitleBarButton")
             self.settings_btn.setText("Settings")
-            self.settings_btn.setIcon(create_button_icons(get_resource_path("Files/cog.svg")))
             self.settings_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             
-            self.clear_btn = QToolButton()
+            self.clear_btn = HoverToolButton(
+                get_resource_path("Files/clear.svg"), 
+                normal_color="#A0A0A0", 
+                hover_color="#d32f2f"
+            )
             self.clear_btn.setObjectName("TitleBarButton")
             self.clear_btn.setText("Clear")
-            self.clear_btn.setIcon(create_button_icons(get_resource_path("Files/clear.svg"), normal_color="#A0A0A0", hover_color="#d32f2f"))
             self.clear_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.clear_btn.setEnabled(False)
             
@@ -1097,28 +1163,30 @@ if "--run-gst-subprocess" not in sys.argv:
             
             window_controls_layout = QHBoxLayout()
             window_controls_layout.setContentsMargins(0, 0, 0, 0)
-
             
-            self.minimize_btn = QToolButton()
+            self.minimize_btn = HoverToolButton(get_resource_path("Files/window-minimize.svg"))
             self.minimize_btn.setObjectName("WindowControlButton")
-            self.minimize_btn.setIcon(create_button_icons(get_resource_path("Files/window-minimize.svg")))
             self.minimize_btn.setFixedSize(40, 40)
             self.minimize_btn.clicked.connect(self.minimize_window)
             
-            self.maximize_btn = QToolButton()
+            self.maximize_btn = HoverToolButton(get_resource_path("Files/window-maximize.svg"))
             self.maximize_btn.setObjectName("WindowControlButton")
-            self.maximize_btn.setIcon(create_button_icons(get_resource_path("Files/window-maximize.svg")))
             self.maximize_btn.setFixedSize(40, 40)
             self.maximize_btn.clicked.connect(self.toggle_maximize)
             
-            self.close_btn = QToolButton()
+            self.close_btn = HoverToolButton(
+                get_resource_path("Files/window-close.svg"),
+                normal_color="#A0A0A0",
+                hover_color="white"
+            )
             self.close_btn.setObjectName("WindowCloseButton")
-            self.close_btn.setIcon(create_button_icons(get_resource_path("Files/window-close.svg"), normal_color="#A0A0A0", hover_color="white"))
             self.close_btn.setFixedSize(40, 40)
             self.close_btn.clicked.connect(self.close_window)
             
-            self.maximize_normal_icon = create_button_icons(get_resource_path("Files/window-maximize.svg"))
-            self.restore_normal_icon = create_button_icons(get_resource_path("Files/window-restore.svg"))
+            self.maximize_normal_icon = load_colored_svg(get_resource_path("Files/window-maximize.svg"), "#A0A0A0")
+            self.restore_normal_icon = load_colored_svg(get_resource_path("Files/window-restore.svg"), "#A0A0A0")
+            self.maximize_hover_icon = load_colored_svg(get_resource_path("Files/window-maximize.svg"), "white")
+            self.restore_hover_icon = load_colored_svg(get_resource_path("Files/window-restore.svg"), "white")
             
             window_controls_layout.addWidget(self.minimize_btn)
             window_controls_layout.addWidget(self.maximize_btn)
@@ -1141,10 +1209,16 @@ if "--run-gst-subprocess" not in sys.argv:
             if self.parent_window:
                 if self.parent_window.isMaximized():
                     self.parent_window.showNormal()
+
+                    self.maximize_btn.normal_icon = self.maximize_normal_icon
+                    self.maximize_btn.hover_icon = self.maximize_hover_icon
                     self.maximize_btn.setIcon(self.maximize_normal_icon)
                 else:
                     self.restore_geometry = self.parent_window.geometry()
                     self.parent_window.showMaximized()
+
+                    self.maximize_btn.normal_icon = self.restore_normal_icon
+                    self.maximize_btn.hover_icon = self.restore_hover_icon
                     self.maximize_btn.setIcon(self.restore_normal_icon)
         
         def close_window(self):
