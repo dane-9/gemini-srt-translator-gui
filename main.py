@@ -384,7 +384,7 @@ if "--run-gst-subprocess" not in sys.argv:
     
     class BulkDescriptionDialog(CustomFramelessDialog):
         def __init__(self, current_text="", parent=None):
-            super().__init__("Bulk Edit Description", parent)
+            super().__init__("Edit Description", parent)
             self.setMinimumSize(400, 200)
             
             layout = self.get_content_layout()
