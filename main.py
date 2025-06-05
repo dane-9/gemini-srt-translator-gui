@@ -622,7 +622,8 @@ if "--run-gst-subprocess" not in sys.argv:
             
             self.move(x, y)
             
-            self.setWindowIcon(QIcon.fromTheme("applications-internet"))
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
+            self.setWindowIcon(QIcon(icon_path))
             self.tasks = []
             self.current_task_index = -1
             self.settings = self._load_settings()
