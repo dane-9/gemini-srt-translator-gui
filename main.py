@@ -1381,8 +1381,8 @@ if "--run-gst-subprocess" not in sys.argv:
             
             self.setWindowTitle("Gemini SRT Translator")
             
-            window_width = 1000
-            window_height = 700
+            window_width = 1100
+            window_height = 750
             self.resize(window_width, window_height)
             
             screen = QApplication.primaryScreen().geometry()
