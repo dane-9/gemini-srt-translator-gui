@@ -71,6 +71,30 @@ QToolButton#TitleBarButton:disabled {
 	border-style: solid;
 }
 
+QToolButton#ControlButton {
+    padding: 5px;
+    margin: 2px;
+    border: none;
+    background-color: #333333;
+    color: #A0A0A0;
+    border-radius: 3px;
+}
+
+QToolButton#ControlButton:hover {
+    background-color: #555555;
+    color: #E0E0E0;
+}
+
+QToolButton#TitleBarButton:pressed {
+    background-color: #444444;
+}
+
+QToolButton#ControlButton:disabled {
+    background-color: #222222;
+	color: #444444;
+	border-style: solid;
+}
+
 QToolButton#WindowControlButton {
     border: none;
     background-color: transparent;

@@ -1241,50 +1241,12 @@ if "--run-gst-subprocess" not in sys.argv:
             
             layout.addStretch()
             
-            self.add_btn = HoverToolButton(get_resource_path("Files/add.svg"))
-            self.add_btn.setObjectName("TitleBarButton")
-            self.add_btn.setText("Add")
-            self.add_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            
-            self.start_btn = HoverToolButton(
-                get_resource_path("Files/start.svg"), 
-                normal_color="#A0A0A0", 
-                hover_color="green"
-            )
-            self.start_btn.setObjectName("TitleBarButton")
-            self.start_btn.setText("Start")
-            self.start_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            
-            self.stop_btn = HoverToolButton(
-                get_resource_path("Files/stop.svg"), 
-                normal_color="#A0A0A0", 
-                hover_color="red"
-            )
-            self.stop_btn.setObjectName("TitleBarButton")
-            self.stop_btn.setText("Stop")
-            self.stop_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.stop_btn.setEnabled(False)
-            
             self.settings_btn = HoverToolButton(get_resource_path("Files/cog.svg"))
             self.settings_btn.setObjectName("TitleBarButton")
             self.settings_btn.setText("Settings")
             self.settings_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             
-            self.clear_btn = HoverToolButton(
-                get_resource_path("Files/clear.svg"), 
-                normal_color="#A0A0A0", 
-                hover_color="#d32f2f"
-            )
-            self.clear_btn.setObjectName("TitleBarButton")
-            self.clear_btn.setText("Clear")
-            self.clear_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-            self.clear_btn.setEnabled(False)
-            
-            layout.addWidget(self.add_btn)
-            layout.addWidget(self.start_btn)
-            layout.addWidget(self.stop_btn)
             layout.addWidget(self.settings_btn)
-            layout.addWidget(self.clear_btn)
             
             separator = QFrame()
             separator.setObjectName("TitleBarSeparator")
@@ -1444,6 +1406,7 @@ if "--run-gst-subprocess" not in sys.argv:
             self.active_thread = None
             self.active_worker = None
             self.clipboard_description = ""
+            self.is_running = False
             
             title_bar = self.getTitleBar()
             title_bar.setTitleBarFont(QFont('Arial', 12))
@@ -1459,11 +1422,7 @@ if "--run-gst-subprocess" not in sys.argv:
                         child.widget().setParent(None)
                 title_bar_layout.addWidget(self.custom_title_bar)
             
-            self.custom_title_bar.add_btn.clicked.connect(self.add_files_action)
-            self.custom_title_bar.start_btn.clicked.connect(self.start_translation_queue)
-            self.custom_title_bar.stop_btn.clicked.connect(self.stop_translation_action)
             self.custom_title_bar.settings_btn.clicked.connect(self.open_settings_dialog)
-            self.custom_title_bar.clear_btn.clicked.connect(self.clear_queue_action)
             
             main_layout = self.layout()
             
@@ -1473,14 +1432,15 @@ if "--run-gst-subprocess" not in sys.argv:
             
             config_layout = QFormLayout()
 
-            api_keys_layout = QHBoxLayout()
+            api_keys_model_layout = QHBoxLayout()
+            
             self.api_key_edit = CustomLineEdit()
             self.api_key_edit.setPlaceholderText("Enter Gemini API Key")
             self.api_key_edit.set_right_text("API Key 1", font_size=9, italic=False, color="#555555")
             self.api_key_edit.setEchoMode(QLineEdit.Password)
             self.api_key_edit.setText(self.settings.get("gemini_api_key", ""))
             self.api_key_edit.textChanged.connect(lambda text: self.settings.update({"gemini_api_key": text}))
-            api_keys_layout.addWidget(self.api_key_edit)
+            api_keys_model_layout.addWidget(self.api_key_edit)
             
             self.api_key2_edit = CustomLineEdit()
             self.api_key2_edit.setPlaceholderText("Enter Gemini API Key (optional)")
@@ -1488,32 +1448,15 @@ if "--run-gst-subprocess" not in sys.argv:
             self.api_key2_edit.setEchoMode(QLineEdit.Password)
             self.api_key2_edit.setText(self.settings.get("gemini_api_key2", ""))
             self.api_key2_edit.textChanged.connect(lambda text: self.settings.update({"gemini_api_key2": text}))
-            api_keys_layout.addWidget(self.api_key2_edit)
-            
-            config_layout.addRow(api_keys_layout)
-            
-            lang_model_layout = QHBoxLayout()
-            self.target_lang_combo = QComboBox()
-            self.target_lang_combo.addItems(LANGUAGES.keys())
-            current_gst_lang_val = self.settings.get("target_language", "Swedish")
-            display_key_for_value = current_gst_lang_val
-            for k, v in LANGUAGES.items():
-                if v == current_gst_lang_val:
-                    display_key_for_value = k
-                    break
-            self.target_lang_combo.setCurrentText(display_key_for_value)
-            self.target_lang_combo.currentTextChanged.connect(
-                lambda text: self.settings.update({"target_language": LANGUAGES.get(text, text)})
-            )
-            lang_model_layout.addWidget(self.target_lang_combo)
+            api_keys_model_layout.addWidget(self.api_key2_edit)
             
             self.model_name_edit = CustomLineEdit()
             self.model_name_edit.setText(self.settings.get("model_name", "gemini-2.5-flash-preview-05-20"))
             self.model_name_edit.set_right_text("Model Used", font_size=9, italic=False, color="#555555")
             self.model_name_edit.textChanged.connect(lambda text: self.settings.update({"model_name": text}))
-            lang_model_layout.addWidget(self.model_name_edit)
+            api_keys_model_layout.addWidget(self.model_name_edit)
             
-            config_layout.addRow("Target Language:", lang_model_layout)
+            config_layout.addRow(api_keys_model_layout)
             
             content_layout.addLayout(config_layout)
             
@@ -1542,6 +1485,82 @@ if "--run-gst-subprocess" not in sys.argv:
             
             content_layout.addWidget(self.tree_view)
             
+            controls_widget = QWidget()
+            controls_widget.setFixedHeight(30)
+            
+            button_group = QWidget(controls_widget)
+            button_layout = QHBoxLayout(button_group)
+            button_layout.setContentsMargins(0, 0, 0, 0)
+            
+            self.add_btn = HoverToolButton(get_resource_path("Files/add.svg"))
+            self.add_btn.setObjectName("ControlButton")
+            self.add_btn.setText("Add")
+            self.add_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            self.add_btn.clicked.connect(self.add_files_action)
+            button_layout.addWidget(self.add_btn)
+            
+            self.start_stop_btn = HoverToolButton(
+                get_resource_path("Files/start.svg"),
+                normal_color="#A0A0A0", 
+                hover_color="green"
+            )
+            self.start_stop_btn.setObjectName("ControlButton")
+            self.start_stop_btn.setText("Start")
+            self.start_stop_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            self.start_stop_btn.clicked.connect(self.toggle_start_stop)
+            button_layout.addWidget(self.start_stop_btn)
+            
+            self.clear_btn = HoverToolButton(
+                get_resource_path("Files/clear.svg"),
+                normal_color="#A0A0A0", 
+                hover_color="#d32f2f"
+            )
+            self.clear_btn.setObjectName("ControlButton")
+            self.clear_btn.setText("Clear")
+            self.clear_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            self.clear_btn.clicked.connect(self.clear_queue_action)
+            self.clear_btn.setEnabled(False)
+            button_layout.addWidget(self.clear_btn)
+            
+            self.target_lang_combo = QComboBox(controls_widget)
+            self.target_lang_combo.addItems(LANGUAGES.keys())
+            current_gst_lang_val = self.settings.get("target_language", "Swedish")
+            display_key_for_value = current_gst_lang_val
+            for k, v in LANGUAGES.items():
+                if v == current_gst_lang_val:
+                    display_key_for_value = k
+                    break
+            self.target_lang_combo.setCurrentText(display_key_for_value)
+            self.target_lang_combo.currentTextChanged.connect(
+                lambda text: self.settings.update({"target_language": LANGUAGES.get(text, text)})
+            )
+            
+            def position_controls():
+                if not hasattr(self, 'target_lang_combo') or not self.target_lang_combo:
+                    return
+                    
+                parent_width = controls_widget.width()
+                
+                combo_width = self.target_lang_combo.sizeHint().width()
+                self.target_lang_combo.resize(combo_width, self.target_lang_combo.sizeHint().height())
+                self.target_lang_combo.move(parent_width - combo_width, 0)
+                
+                button_group.adjustSize()
+                button_group_width = button_group.sizeHint().width()
+                center_x = (parent_width - button_group_width) // 2
+                button_group.move(center_x, 0)
+            
+            original_resize = controls_widget.resizeEvent
+            def new_resize_event(event):
+                if original_resize:
+                    original_resize(event)
+                position_controls()
+            controls_widget.resizeEvent = new_resize_event
+            
+            QTimer.singleShot(0, position_controls)
+            
+            content_layout.addWidget(controls_widget)
+            
             self.overall_progress_bar = QProgressBar()
             self.overall_progress_bar.setTextVisible(True)
             self.overall_progress_bar.setFormat("%p% - Current Task")
@@ -1551,6 +1570,12 @@ if "--run-gst-subprocess" not in sys.argv:
             main_layout.addWidget(content_widget)
             
             self.update_button_states()
+
+        def toggle_start_stop(self):
+            if self.is_running:
+                self.stop_translation_action()
+            else:
+                self.start_translation_queue()
 
         def on_item_changed(self, item):
             if item.column() == 2:
@@ -2105,7 +2130,7 @@ if "--run-gst-subprocess" not in sys.argv:
             self.overall_progress_bar.setVisible(True)
             self.overall_progress_bar.setValue(0)
             self.overall_progress_bar.setFormat("%p% - Current Task")
-            self.custom_title_bar.stop_btn.setEnabled(True)
+            self.is_running = True
             
             self.active_worker = SubprocessWorker(
                 task_index=task_idx, input_file_path=task["path"], target_lang_gst_value=task["lang_value"],
@@ -2138,6 +2163,7 @@ if "--run-gst-subprocess" not in sys.argv:
 
         def _handle_queue_finished(self):
             self.overall_progress_bar.setVisible(False)
+            self.is_running = False
             self.update_button_states()
             self.current_task_index = -1
 
@@ -2207,6 +2233,8 @@ if "--run-gst-subprocess" not in sys.argv:
                     self._cleanup_translated_srt_file()
                 if not self.active_worker:
                     self._find_and_process_next_queued_task()
+            
+            self.is_running = False
             self.update_button_states()
         
         @Slot()
@@ -2222,6 +2250,7 @@ if "--run-gst-subprocess" not in sys.argv:
                 self.overall_progress_bar.setVisible(False)
                 self.active_thread = None
                 self.active_worker = None
+                self.is_running = False
                 self.update_button_states()
 
         @Slot()
@@ -2237,15 +2266,19 @@ if "--run-gst-subprocess" not in sys.argv:
             has_any_tasks = len(self.tasks) > 0
             has_api_key = bool(self.api_key_edit.text().strip())
             
-            start_enabled = has_queued_tasks and not is_processing and has_api_key
-            self.custom_title_bar.start_btn.setEnabled(start_enabled)
-            
-            if start_enabled:
-                self.custom_title_bar.stop_btn.setEnabled(False)
+            if self.is_running or is_processing:
+                self.start_stop_btn.setText("Stop")
+                self.start_stop_btn.setIcon(load_colored_svg(get_resource_path("Files/stop.svg"), "#A0A0A0"))
+                self.start_stop_btn.hover_icon = load_colored_svg(get_resource_path("Files/stop.svg"), "red")
+                self.start_stop_btn.setEnabled(True)
             else:
-                self.custom_title_bar.stop_btn.setEnabled(is_processing or has_queued_tasks)
+                self.start_stop_btn.setText("Start")
+                self.start_stop_btn.setIcon(load_colored_svg(get_resource_path("Files/start.svg"), "#A0A0A0"))
+                self.start_stop_btn.hover_icon = load_colored_svg(get_resource_path("Files/start.svg"), "green")
+                start_enabled = has_queued_tasks and has_api_key
+                self.start_stop_btn.setEnabled(start_enabled)
             
-            self.custom_title_bar.clear_btn.setEnabled(has_any_tasks and not is_processing)
+            self.clear_btn.setEnabled(has_any_tasks and not is_processing and not self.is_running)
 
 if __name__ == "__main__":
     if "--run-gst-subprocess" in sys.argv:
