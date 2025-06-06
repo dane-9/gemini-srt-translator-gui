@@ -43,31 +43,16 @@ def load_colored_svg(svg_path, color="#A0A0A0"):
         print(f"Error loading SVG {svg_path}: {e}")
         return QIcon()
 
-def create_button_icons(svg_path, normal_color="#A0A0A0", hover_color="white", disabled_color="#444444"):
-    icon = QIcon()
-
-    normal_pixmap = load_colored_svg(svg_path, normal_color).pixmap(16, 16)
-    icon.addPixmap(normal_pixmap, QIcon.Normal, QIcon.Off)
-
-    hover_pixmap = load_colored_svg(svg_path, hover_color).pixmap(16, 16)
-    icon.addPixmap(hover_pixmap, QIcon.Active, QIcon.Off)
-
-    disabled_pixmap = load_colored_svg(svg_path, disabled_color).pixmap(16, 16)
-    icon.addPixmap(disabled_pixmap, QIcon.Disabled, QIcon.Off)
-
-    return icon
-
 if "--run-gst-subprocess" not in sys.argv:
     from PySide6.QtWidgets import (
-        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+        QApplication, QWidget, QVBoxLayout, QHBoxLayout,
         QPushButton, QTreeView, QLineEdit, QLabel, QFileDialog, QMessageBox,
-        QComboBox, QGroupBox, QToolBar, QProgressBar, QDialog, QFormLayout,
+        QComboBox, QProgressBar, QDialog, QFormLayout,
         QSpinBox, QDoubleSpinBox, QCheckBox, QDialogButtonBox, QMenu, QTextEdit,
-        QToolButton, QSizePolicy, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
-        QStackedWidget, QStyle
+        QToolButton, QFrame, QStackedWidget, QStyle
     )
     from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap, QPainter, QLinearGradient, QColor, QPen
-    from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QProcessEnvironment, QTimer, QItemSelectionModel, QRect, QPropertyAnimation, QEasingCurve
+    from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QTimer, QItemSelectionModel, QRect
     from pyqt_frameless_window import FramelessWidget
     
     def load_stylesheet():
@@ -1894,16 +1879,6 @@ if "--run-gst-subprocess" not in sys.argv:
                     json.dump(self.settings, f, indent=4)
             except Exception as e:
                 CustomMessageBox.warning(self, "Save Settings Error", f"Could not save settings: {e}")
-                
-        def center_dialog_on_parent(dialog, parent):
-            if parent:
-                parent_geometry = parent.geometry()
-                dialog_size = dialog.size()
-                
-                x = parent_geometry.x() + (parent_geometry.width() - dialog_size.width()) // 2
-                y = parent_geometry.y() + (parent_geometry.height() - dialog_size.height()) // 2
-                
-                dialog.move(x, y)
 
         def _cleanup_all_progress_files(self):
             script_dir = get_app_directory()
