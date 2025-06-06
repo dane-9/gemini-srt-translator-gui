@@ -2055,5 +2055,4 @@ if __name__ == "__main__":
     app.setStyleSheet(load_stylesheet())
     window = MainWindow()
     window.show()
-    exit_code = app.exec()
-    sys.exit(exit_code)
+    sys.exit(app.exec())
