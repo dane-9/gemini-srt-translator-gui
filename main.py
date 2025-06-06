@@ -1161,6 +1161,7 @@ if "--run-gst-subprocess" not in sys.argv:
             self._right_text_font = QFont()
             self._right_text_color = QColor(128, 128, 128)
             self._right_text_margin = 10
+            self._base_right_margin = 0
             
         def set_right_text(self, text, font_size=10, bold=False, italic=False, color=None):
             self._right_text = text
@@ -1178,21 +1179,40 @@ if "--run-gst-subprocess" not in sys.argv:
                 elif isinstance(color, tuple) and len(color) == 3:
                     self._right_text_color = QColor(color[0], color[1], color[2])
             
+            self._update_text_margins()
             self.update()
         
         def set_right_text_margin(self, margin):
             self._right_text_margin = margin
+            self._update_text_margins()
             self.update()
         
         def clear_right_text(self):
             self._right_text = ""
+            self._update_text_margins()
             self.update()
         
+        def _update_text_margins(self):
+            if self._right_text:
+                font_metrics = QFontMetrics(self._right_text_font)
+                right_text_width = font_metrics.horizontalAdvance(self._right_text)
+                
+                right_margin = right_text_width + self._right_text_margin + self._base_right_margin
+                
+                margins = self.textMargins()
+                self.setTextMargins(margins.left(), margins.top(), right_margin, margins.bottom())
+            else:
+                margins = self.textMargins()
+                self.setTextMargins(margins.left(), margins.top(), self._base_right_margin, margins.bottom())
+        
+        def resizeEvent(self, event):
+            super().resizeEvent(event)
+            if self._right_text:
+                self._update_text_margins()
+        
         def paintEvent(self, event):
-
             super().paintEvent(event)
             
-
             if not self._right_text:
                 return
             
@@ -1208,17 +1228,9 @@ if "--run-gst-subprocess" not in sys.argv:
                 text_height = font_metrics.height()
                 
                 widget_rect = self.rect()
+                
                 text_x = widget_rect.width() - text_width - self._right_text_margin
                 text_y = (widget_rect.height() + text_height) // 2 - font_metrics.descent()
-                
-                current_text = self.text()
-                if current_text:
-                    main_font_metrics = QFontMetrics(self.font())
-                    current_text_width = main_font_metrics.horizontalAdvance(current_text)
-                    text_area_start = 10
-                    
-                    if text_x < text_area_start + current_text_width + 10:
-                        text_x = max(text_area_start + current_text_width + 10, widget_rect.width() - text_width - 5)
                 
                 painter.drawText(text_x, text_y, self._right_text)
             finally:
