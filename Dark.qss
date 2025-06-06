@@ -73,7 +73,6 @@ QToolButton#TitleBarButton:disabled {
 
 QToolButton#ControlButton {
     padding: 5px;
-    margin: 2px;
     border: none;
     background-color: #333333;
     color: #A0A0A0;
