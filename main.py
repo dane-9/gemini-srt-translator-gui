@@ -1495,6 +1495,8 @@ if "--run-gst-subprocess" not in sys.argv:
             self.add_btn = HoverPushButton(get_resource_path("Files/add.svg"))
             self.add_btn.setObjectName("ControlButton")
             self.add_btn.setText("Add")
+            self.add_btn.setFixedWidth(100)
+            self.add_btn.setFixedHeight(28)
             self.add_btn.clicked.connect(self.add_files_action)
             button_layout.addWidget(self.add_btn)
             
@@ -1505,6 +1507,8 @@ if "--run-gst-subprocess" not in sys.argv:
             )
             self.start_stop_btn.setObjectName("ControlButton")
             self.start_stop_btn.setText("Start")
+            self.start_stop_btn.setFixedWidth(200)
+            self.start_stop_btn.setFixedHeight(30)
             self.start_stop_btn.clicked.connect(self.toggle_start_stop)
             button_layout.addWidget(self.start_stop_btn)
             
@@ -1515,6 +1519,8 @@ if "--run-gst-subprocess" not in sys.argv:
             )
             self.clear_btn.setObjectName("ControlButton")
             self.clear_btn.setText("Clear")
+            self.clear_btn.setFixedWidth(100)
+            self.clear_btn.setFixedHeight(28)
             self.clear_btn.clicked.connect(self.clear_queue_action)
             self.clear_btn.setEnabled(False)
             button_layout.addWidget(self.clear_btn)
