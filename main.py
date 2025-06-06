@@ -1253,10 +1253,10 @@ if "--run-gst-subprocess" not in sys.argv:
             
             layout.addStretch()
             
-            self.settings_btn = HoverToolButton(get_resource_path("Files/cog.svg"))
+            self.settings_btn = HoverPushButton(get_resource_path("Files/cog.svg"))
             self.settings_btn.setObjectName("TitleBarButton")
+            self.settings_btn.setFixedHeight(30)
             self.settings_btn.setText("Settings")
-            self.settings_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             
             layout.addWidget(self.settings_btn)
             
