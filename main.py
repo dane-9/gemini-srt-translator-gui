@@ -1507,7 +1507,7 @@ if "--run-gst-subprocess" not in sys.argv:
             )
             self.start_stop_btn.setObjectName("ControlButton")
             self.start_stop_btn.setText("Start")
-            self.start_stop_btn.setFixedWidth(200)
+            self.start_stop_btn.setFixedWidth(280)
             self.start_stop_btn.setFixedHeight(30)
             self.start_stop_btn.clicked.connect(self.toggle_start_stop)
             button_layout.addWidget(self.start_stop_btn)
