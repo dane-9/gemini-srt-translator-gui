@@ -59,7 +59,35 @@ if "--run-gst-subprocess" not in sys.argv:
         try:
             qss_file_path = get_resource_path("dark.qss")
             with open(qss_file_path, 'r', encoding='utf-8') as f:
-                return f.read()
+                qss = f.read()
+            
+            try:
+                # Dropdown arrow
+                dropdown_svg_path = get_resource_path("Files/dropdown.svg").replace("\\", "/")
+                qss = qss.replace("QComboBox::drop-down {", 
+                                f"QComboBox::drop-down {{ image: url({dropdown_svg_path});")
+                
+                qss += f"""QComboBox::down-arrow {{ image: url({dropdown_svg_path}); width: 24px; height: 24px; }}"""
+                
+                # Spinbox up arrow
+                arrow_up_svg_path = get_resource_path("Files/arrow-up.svg").replace("\\", "/")
+                qss = qss.replace("QSpinBox::up-button {", 
+                                f"QSpinBox::up-button {{ image: url({arrow_up_svg_path});")
+                qss = qss.replace("QDoubleSpinBox::up-button {", 
+                                f"QDoubleSpinBox::up-button {{ image: url({arrow_up_svg_path});")
+                
+                # Spinbox down arrow
+                arrow_down_svg_path = get_resource_path("Files/arrow-down.svg").replace("\\", "/")
+                qss = qss.replace("QSpinBox::down-button {", 
+                                f"QSpinBox::down-button {{ image: url({arrow_down_svg_path});")
+                qss = qss.replace("QDoubleSpinBox::down-button {", 
+                                f"QDoubleSpinBox::down-button {{ image: url({arrow_down_svg_path});")
+                
+            except Exception as e:
+                print(f"Error processing SVG arrows: {e}")
+            
+            return qss
+            
         except FileNotFoundError:
             return ""
         except Exception as e:

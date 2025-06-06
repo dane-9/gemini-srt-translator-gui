@@ -158,7 +158,6 @@ QComboBox {
     color: #A0A0A0;
     border-radius: 3px;
     padding: 5px;
-    min-width: 6em;
 }
 
 QComboBox:hover {
@@ -167,26 +166,10 @@ QComboBox:hover {
 }
 
 QComboBox::drop-down {
-    subcontrol-origin: padding;
-    subcontrol-position: top right;
     width: 15px;
     height: 15px;
     margin-right: 5px;
     margin-top: 5px;
-    border-left-width: 1px;
-    border-left-color: #555555;
-    border-left-style: solid;
-    border-top-right-radius: 3px;
-    border-bottom-right-radius: 3px;
-    background-color: #444444;
-}
-
-QComboBox::down-arrow {
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 6px solid #A0A0A0;
-    width: 0px;
-    height: 0px;
 }
 
 QComboBox QAbstractItemView {
@@ -223,7 +206,6 @@ QDoubleSpinBox::up-button, QSpinBox::up-button {
     width: 16px;
     border-left: 1px solid #555;
     background: #3a3a3a;
-    image: url("Files/arrow-up.svg");
 }
 
 QDoubleSpinBox::down-button, QSpinBox::down-button {
@@ -232,7 +214,6 @@ QDoubleSpinBox::down-button, QSpinBox::down-button {
     width: 16px;
     border-left: 1px solid #555;
     background: #3a3a3a;
-    image: url("Files/arrow-down.svg");
 }
 
 QDoubleSpinBox::up-button:hover, QSpinBox::up-button:hover {
