@@ -1428,7 +1428,7 @@ if "--run-gst-subprocess" not in sys.argv:
             
             content_widget = QWidget()
             content_layout = QVBoxLayout(content_widget)
-            content_layout.setContentsMargins(10, 10, 10, 10)
+            content_layout.setContentsMargins(6, 6, 6, 6)
             
             config_layout = QFormLayout()
 
