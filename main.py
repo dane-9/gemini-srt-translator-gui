@@ -1492,32 +1492,29 @@ if "--run-gst-subprocess" not in sys.argv:
             button_layout = QHBoxLayout(button_group)
             button_layout.setContentsMargins(0, 0, 0, 0)
             
-            self.add_btn = HoverToolButton(get_resource_path("Files/add.svg"))
+            self.add_btn = HoverPushButton(get_resource_path("Files/add.svg"))
             self.add_btn.setObjectName("ControlButton")
             self.add_btn.setText("Add")
-            self.add_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.add_btn.clicked.connect(self.add_files_action)
             button_layout.addWidget(self.add_btn)
             
-            self.start_stop_btn = HoverToolButton(
+            self.start_stop_btn = HoverPushButton(
                 get_resource_path("Files/start.svg"),
                 normal_color="#A0A0A0", 
                 hover_color="green"
             )
             self.start_stop_btn.setObjectName("ControlButton")
             self.start_stop_btn.setText("Start")
-            self.start_stop_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.start_stop_btn.clicked.connect(self.toggle_start_stop)
             button_layout.addWidget(self.start_stop_btn)
             
-            self.clear_btn = HoverToolButton(
+            self.clear_btn = HoverPushButton(
                 get_resource_path("Files/clear.svg"),
                 normal_color="#A0A0A0", 
                 hover_color="#d32f2f"
             )
             self.clear_btn.setObjectName("ControlButton")
             self.clear_btn.setText("Clear")
-            self.clear_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.clear_btn.clicked.connect(self.clear_queue_action)
             self.clear_btn.setEnabled(False)
             button_layout.addWidget(self.clear_btn)
