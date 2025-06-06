@@ -51,7 +51,7 @@ if "--run-gst-subprocess" not in sys.argv:
         QSpinBox, QDoubleSpinBox, QCheckBox, QDialogButtonBox, QMenu, QTextEdit,
         QToolButton, QFrame, QStackedWidget, QStyle
     )
-    from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap, QPainter, QLinearGradient, QColor, QPen
+    from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap, QPainter, QLinearGradient, QColor, QPen, QFontMetrics
     from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QTimer, QItemSelectionModel, QRect
     from pyqt_frameless_window import FramelessWidget
     
@@ -1153,6 +1153,76 @@ if "--run-gst-subprocess" not in sys.argv:
                     self.process.kill()
                 except Exception as e:
                     pass
+                    
+    class CustomLineEdit(QLineEdit):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._right_text = ""
+            self._right_text_font = QFont()
+            self._right_text_color = QColor(128, 128, 128)
+            self._right_text_margin = 10
+            
+        def set_right_text(self, text, font_size=10, bold=False, italic=False, color=None):
+            self._right_text = text
+            
+            self._right_text_font = QFont()
+            self._right_text_font.setPointSize(font_size)
+            self._right_text_font.setBold(bold)
+            self._right_text_font.setItalic(italic)
+            
+            if color:
+                if isinstance(color, str):
+                    self._right_text_color = QColor(color)
+                elif isinstance(color, QColor):
+                    self._right_text_color = color
+                elif isinstance(color, tuple) and len(color) == 3:
+                    self._right_text_color = QColor(color[0], color[1], color[2])
+            
+            self.update()
+        
+        def set_right_text_margin(self, margin):
+            self._right_text_margin = margin
+            self.update()
+        
+        def clear_right_text(self):
+            self._right_text = ""
+            self.update()
+        
+        def paintEvent(self, event):
+
+            super().paintEvent(event)
+            
+
+            if not self._right_text:
+                return
+            
+            painter = QPainter(self)
+            try:
+                painter.setRenderHint(QPainter.Antialiasing)
+                
+                painter.setFont(self._right_text_font)
+                painter.setPen(self._right_text_color)
+                
+                font_metrics = QFontMetrics(self._right_text_font)
+                text_width = font_metrics.horizontalAdvance(self._right_text)
+                text_height = font_metrics.height()
+                
+                widget_rect = self.rect()
+                text_x = widget_rect.width() - text_width - self._right_text_margin
+                text_y = (widget_rect.height() + text_height) // 2 - font_metrics.descent()
+                
+                current_text = self.text()
+                if current_text:
+                    main_font_metrics = QFontMetrics(self.font())
+                    current_text_width = main_font_metrics.horizontalAdvance(current_text)
+                    text_area_start = 10
+                    
+                    if text_x < text_area_start + current_text_width + 10:
+                        text_x = max(text_area_start + current_text_width + 10, widget_rect.width() - text_width - 5)
+                
+                painter.drawText(text_x, text_y, self._right_text)
+            finally:
+                painter.end()
 
     class CustomTitleBarWidget(QWidget):
         def __init__(self, parent=None):
@@ -1402,24 +1472,27 @@ if "--run-gst-subprocess" not in sys.argv:
             content_layout.setContentsMargins(10, 10, 10, 10)
             
             config_layout = QFormLayout()
-            
+
             api_keys_layout = QHBoxLayout()
-            self.api_key_edit = QLineEdit()
-            self.api_key_edit.setPlaceholderText("Enter your Gemini API Key")
+            self.api_key_edit = CustomLineEdit()
+            self.api_key_edit.setPlaceholderText("Enter Gemini API Key")
+            self.api_key_edit.set_right_text("API Key 1", font_size=9, italic=False, color="#555555")
             self.api_key_edit.setEchoMode(QLineEdit.Password)
             self.api_key_edit.setText(self.settings.get("gemini_api_key", ""))
             self.api_key_edit.textChanged.connect(lambda text: self.settings.update({"gemini_api_key": text}))
             api_keys_layout.addWidget(self.api_key_edit)
             
-            self.api_key2_edit = QLineEdit()
-            self.api_key2_edit.setPlaceholderText("Second API Key (optional)")
+            self.api_key2_edit = CustomLineEdit()
+            self.api_key2_edit.setPlaceholderText("Enter Gemini API Key (optional)")
+            self.api_key2_edit.set_right_text("API Key 2", font_size=9, italic=False, color="#555555")
             self.api_key2_edit.setEchoMode(QLineEdit.Password)
             self.api_key2_edit.setText(self.settings.get("gemini_api_key2", ""))
             self.api_key2_edit.textChanged.connect(lambda text: self.settings.update({"gemini_api_key2": text}))
             api_keys_layout.addWidget(self.api_key2_edit)
             
-            config_layout.addRow("API Keys:", api_keys_layout)
+            config_layout.addRow(api_keys_layout)
             
+            lang_model_layout = QHBoxLayout()
             self.target_lang_combo = QComboBox()
             self.target_lang_combo.addItems(LANGUAGES.keys())
             current_gst_lang_val = self.settings.get("target_language", "Swedish")
@@ -1432,12 +1505,15 @@ if "--run-gst-subprocess" not in sys.argv:
             self.target_lang_combo.currentTextChanged.connect(
                 lambda text: self.settings.update({"target_language": LANGUAGES.get(text, text)})
             )
-            config_layout.addRow("Target Language:", self.target_lang_combo)
+            lang_model_layout.addWidget(self.target_lang_combo)
             
-            self.model_name_edit = QLineEdit()
+            self.model_name_edit = CustomLineEdit()
             self.model_name_edit.setText(self.settings.get("model_name", "gemini-2.5-flash-preview-05-20"))
+            self.model_name_edit.set_right_text("Model Used", font_size=9, italic=False, color="#555555")
             self.model_name_edit.textChanged.connect(lambda text: self.settings.update({"model_name": text}))
-            config_layout.addRow("Model Name:", self.model_name_edit)
+            lang_model_layout.addWidget(self.model_name_edit)
+            
+            config_layout.addRow("Target Language:", lang_model_layout)
             
             content_layout.addLayout(config_layout)
             
