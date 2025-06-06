@@ -358,6 +358,7 @@ if "--run-gst-subprocess" not in sys.argv:
             
             self.setWindowTitle(title)
             self.setWindowModality(Qt.ApplicationModal)
+            self.parent_window = parent
             
             self._result = QDialog.Rejected
             self._finished = False
@@ -385,8 +386,29 @@ if "--run-gst-subprocess" not in sys.argv:
             main_layout = self.layout()
             main_layout.addWidget(self.content_widget)
         
+        def center_on_parent(self):
+            if self.parent_window:
+                parent_geometry = self.parent_window.geometry()
+                dialog_geometry = self.geometry()
+                
+                x = parent_geometry.x() + (parent_geometry.width() - dialog_geometry.width()) // 2
+                y = parent_geometry.y() + (parent_geometry.height() - dialog_geometry.height()) // 2
+                
+                screen = QApplication.primaryScreen().geometry()
+                x = max(0, min(x, screen.width() - dialog_geometry.width()))
+                y = max(0, min(y, screen.height() - dialog_geometry.height()))
+                
+                self.move(x, y)
+            else:
+                screen = QApplication.primaryScreen().geometry()
+                dialog_geometry = self.geometry()
+                x = (screen.width() - dialog_geometry.width()) // 2
+                y = (screen.height() - dialog_geometry.height()) // 2
+                self.move(x, y)
+        
         def showEvent(self, event):
             super().showEvent(event)
+            QTimer.singleShot(0, self.center_on_parent)
         
         def set_title(self, title):
             self.custom_title_bar.set_title(title)
@@ -416,11 +438,9 @@ if "--run-gst-subprocess" not in sys.argv:
         def exec(self):
             self._finished = False
             self._result = QDialog.Rejected
-            
 
             self.show()
             
-
             app = QApplication.instance()
             while not self._finished and self.isVisible():
                 app.processEvents()
@@ -1574,13 +1594,13 @@ if "--run-gst-subprocess" not in sys.argv:
             
             QTimer.singleShot(0, position_controls)
             
-            content_layout.addWidget(controls_widget)
-            
             self.overall_progress_bar = QProgressBar()
             self.overall_progress_bar.setTextVisible(True)
             self.overall_progress_bar.setFormat("%p% - Current Task")
             self.overall_progress_bar.setVisible(False)
             content_layout.addWidget(self.overall_progress_bar)
+            
+            content_layout.addWidget(controls_widget)
             
             main_layout.addWidget(content_widget)
             
