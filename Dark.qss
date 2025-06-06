@@ -47,13 +47,6 @@ QWidget#CustomTitleBar {
     border-bottom: 1px solid #555555;
 }
 
-QLabel#AppTitle {
-    font-weight: bold;
-    color: #A0A0A0;
-    font-size: 14px;
-    background-color: transparent;
-}
-
 QToolButton#TitleBarButton {
     padding: 5px;
     margin: 2px;

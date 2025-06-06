@@ -66,7 +66,7 @@ if "--run-gst-subprocess" not in sys.argv:
         QToolButton, QSizePolicy, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
         QStackedWidget, QStyle
     )
-    from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap
+    from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap, QPainter, QLinearGradient, QColor, QPen
     from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QProcessEnvironment, QTimer, QItemSelectionModel, QRect, QPropertyAnimation, QEasingCurve
     from pyqt_frameless_window import FramelessWidget
     
@@ -228,6 +228,54 @@ if "--run-gst-subprocess" not in sys.argv:
             if event.button() == Qt.LeftButton:
                 self.mouse_pressed = False
                 self.mouse_pos = None
+                
+    class GradientTitleWidget(QWidget):
+        def __init__(self, text="Gemini SRT Translator", parent=None):
+            super().__init__(parent)
+            self.text = text
+            self.setMinimumHeight(30)
+            self.setMaximumHeight(40)
+            
+            self.font = QFont("Arial", 13, QFont.Bold)
+            self.setFont(self.font)
+            
+            fm = self.fontMetrics()
+            text_width = fm.horizontalAdvance(self.text)
+            self.setMinimumWidth(text_width)
+            self.setMaximumWidth(text_width)
+        
+        def paintEvent(self, event):
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            content_rect = self.contentsRect()
+            
+            gradient = QLinearGradient(content_rect.left(), 0, content_rect.right(), 0)
+            gradient.setColorAt(0.0, QColor("#4995ff"))
+            gradient.setColorAt(0.7, QColor("#a981d8"))
+            gradient.setColorAt(1.0, QColor("#e84d62"))
+            
+            pen = QPen()
+            pen.setBrush(gradient)
+            pen.setWidth(1)
+            painter.setPen(pen)
+            
+            painter.setFont(self.font)
+            
+            fm = painter.fontMetrics()
+            text_rect = fm.boundingRect(self.text)
+            x = content_rect.left() + (content_rect.width() - text_rect.width()) // 2
+            y = content_rect.top() + (content_rect.height() + text_rect.height()) // 2 - fm.descent()
+            
+            painter.drawText(x, y, self.text)
+        
+        def setText(self, text):
+            self.text = text
+            fm = self.fontMetrics()
+            text_width = fm.horizontalAdvance(self.text)
+            self.setMinimumWidth(text_width)
+            self.setMaximumWidth(text_width)
+            self.update()
                 
     class HoverToolButton(QToolButton):
         def __init__(self, svg_path, normal_color="#A0A0A0", hover_color="white", disabled_color="#444444", parent=None):
@@ -1104,9 +1152,9 @@ if "--run-gst-subprocess" not in sys.argv:
             layout.setContentsMargins(10, 0, 0, 0)
             layout.setSpacing(5)
             
-            self.title_label = QLabel("Gemini SRT Translator")
-            self.title_label.setObjectName("AppTitle")
-            layout.addWidget(self.title_label)
+            self.title_widget = GradientTitleWidget("Gemini SRT Translator")
+            self.setObjectName("AppTitle")
+            layout.addWidget(self.title_widget)
             
             layout.addStretch()
             
