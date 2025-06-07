@@ -1417,14 +1417,14 @@ class MainWindow(FramelessWidget):
         self.add_btn.clicked.connect(self.add_files_action)
         button_layout.addWidget(self.add_btn)
         
-        self.start_stop_btn = HoverPushButton(
-            get_resource_path("Files/start.svg"),
-            normal_color="#A0A0A0", 
-            hover_color="green"
-        )
+        self.start_stop_btn = QPushButton("Start Translations")
         self.start_stop_btn.setObjectName("ControlButton")
-        self.start_stop_btn.setText("Start")
-        self.start_stop_btn.setFixedWidth(280)
+        
+        button_font = self.start_stop_btn.font()
+        button_font.setBold(True)
+        self.start_stop_btn.setFont(button_font)
+        
+        self.start_stop_btn.setFixedWidth(320)
         self.start_stop_btn.setFixedHeight(30)
         self.start_stop_btn.clicked.connect(self.toggle_start_stop)
         button_layout.addWidget(self.start_stop_btn)
@@ -2160,14 +2160,10 @@ class MainWindow(FramelessWidget):
         has_api_key = bool(self.api_key_edit.text().strip())
         
         if self.is_running or is_processing:
-            self.start_stop_btn.setText("Stop")
-            self.start_stop_btn.setIcon(load_colored_svg(get_resource_path("Files/stop.svg"), "#A0A0A0"))
-            self.start_stop_btn.hover_icon = load_colored_svg(get_resource_path("Files/stop.svg"), "red")
+            self.start_stop_btn.setText("Stop Translating")
             self.start_stop_btn.setEnabled(True)
         else:
-            self.start_stop_btn.setText("Start")
-            self.start_stop_btn.setIcon(load_colored_svg(get_resource_path("Files/start.svg"), "#A0A0A0"))
-            self.start_stop_btn.hover_icon = load_colored_svg(get_resource_path("Files/start.svg"), "green")
+            self.start_stop_btn.setText("Start Translating")
             start_enabled = has_queued_tasks and has_api_key
             self.start_stop_btn.setEnabled(start_enabled)
         
