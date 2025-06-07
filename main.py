@@ -1557,8 +1557,21 @@ class MainWindow(FramelessWidget):
     def open_language_selection(self):
         dialog = LanguageSelectionDialog(self.selected_languages, self)
         if dialog.exec():
+            old_languages = self.selected_languages.copy()
             self.selected_languages = dialog.get_selected_languages()
             self.settings["selected_languages"] = self.selected_languages
+            
+            if old_languages != self.selected_languages:
+                new_lang_codes_display = ", ".join(self.selected_languages)
+                new_language_names = self._get_language_names_from_codes(self.selected_languages)
+                new_lang_names_display = ", ".join(new_language_names)
+                
+                for task in self.tasks:
+                    if task["languages"] == old_languages:
+                        task["lang_item"].setText(new_lang_codes_display)
+                        task["lang_item"].setToolTip(new_lang_names_display)
+                        task["languages"] = self.selected_languages.copy()
+            
             self._save_settings()
     
     @Slot(int, str, bool)
@@ -1930,6 +1943,9 @@ class MainWindow(FramelessWidget):
         if files:
             lang_codes_display = ", ".join(self.selected_languages)
             
+            language_names = self._get_language_names_from_codes(self.selected_languages)
+            lang_names_display = ", ".join(language_names)
+            
             for file_path in files:
                 if any(task['path'] == file_path and task['languages'] == self.selected_languages for task in self.tasks):
                     continue
@@ -1939,6 +1955,7 @@ class MainWindow(FramelessWidget):
                 path_item.setEditable(False)
                 
                 lang_item = QStandardItem(lang_codes_display)
+                lang_item.setToolTip(lang_names_display)
                 lang_item.setEditable(False)
                 
                 desc_item = QStandardItem("")
@@ -2047,7 +2064,6 @@ class MainWindow(FramelessWidget):
     @Slot(int, str)
     def on_worker_status_message(self, task_idx, message):
         if 0 <= task_idx < len(self.tasks) and self.current_task_index == task_idx:
-            # Only update status for initial messages, not for progress updates
             current_text = self.tasks[task_idx]["status_item"].text()
             if not (current_text.startswith("Thinking") or current_text.startswith("Processing")):
                 self.tasks[task_idx]["status_item"].setText(message)
@@ -2149,6 +2165,17 @@ class MainWindow(FramelessWidget):
             self.start_stop_btn.setEnabled(start_enabled)
         
         self.clear_btn.setEnabled(has_any_tasks and not is_processing and not self.is_running)
+        
+    def _get_language_names_from_codes(self, lang_codes):
+        names = []
+        for code in lang_codes:
+            for name, lang_code in LANGUAGES.items():
+                if lang_code == code:
+                    names.append(name)
+                    break
+            else:
+                names.append(code.upper())
+        return names
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
