@@ -1435,8 +1435,8 @@ class MainWindow(FramelessWidget):
             hover_color="#d32f2f"
         )
         self.clear_btn.setObjectName("ControlButton")
-        self.clear_btn.setText("Clear")
-        self.clear_btn.setFixedWidth(100)
+        self.clear_btn.setText("Clear Queue")
+        self.clear_btn.setFixedWidth(120)
         self.clear_btn.setFixedHeight(28)
         self.clear_btn.clicked.connect(self.clear_queue_action)
         self.clear_btn.setEnabled(False)
