@@ -1351,7 +1351,7 @@ class MainWindow(FramelessWidget):
         self.api_key_edit.set_right_text("API Key 1", font_size=9, italic=False, color="#555555")
         self.api_key_edit.setEchoMode(QLineEdit.Password)
         self.api_key_edit.setText(self.settings.get("gemini_api_key", ""))
-        self.api_key_edit.textChanged.connect(lambda text: self.settings.update({"gemini_api_key": text}))
+        self.api_key_edit.textChanged.connect(lambda text: (self.settings.update({"gemini_api_key": text}), self.update_button_states()))
         api_keys_model_layout.addWidget(self.api_key_edit)
         
         self.api_key2_edit = CustomLineEdit()
@@ -1988,8 +1988,8 @@ class MainWindow(FramelessWidget):
             self.update_button_states()
 
     def start_translation_queue(self):
-        if not self.api_key_edit.text().strip():
-            CustomMessageBox.warning(self, "API Key Missing", "Please enter your Gemini API Key.")
+        if len(self.api_key_edit.text().strip()) < 12:
+            CustomMessageBox.warning(self, "API Key Invalid", "Please enter a valid Gemini API Key.")
             self.api_key_edit.setFocus()
             return
             
@@ -2157,15 +2157,19 @@ class MainWindow(FramelessWidget):
         has_queued_tasks = any(task["status_item"].text() == "Queued" for task in self.tasks)
         is_processing = self.active_thread is not None and self.active_thread.isRunning()
         has_any_tasks = len(self.tasks) > 0
-        has_api_key = bool(self.api_key_edit.text().strip())
+        api_key_valid = len(self.api_key_edit.text().strip()) >= 12
         
         if self.is_running or is_processing:
             self.start_stop_btn.setText("Stop Translating")
             self.start_stop_btn.setEnabled(True)
         else:
-            self.start_stop_btn.setText("Start Translating")
-            start_enabled = has_queued_tasks and has_api_key
-            self.start_stop_btn.setEnabled(start_enabled)
+            if not api_key_valid:
+                self.start_stop_btn.setText("Missing API Key")
+                self.start_stop_btn.setEnabled(False)
+            else:
+                self.start_stop_btn.setText("Start Translating")
+                start_enabled = has_queued_tasks
+                self.start_stop_btn.setEnabled(start_enabled)
         
         self.clear_btn.setEnabled(has_any_tasks and not is_processing and not self.is_running)
         
