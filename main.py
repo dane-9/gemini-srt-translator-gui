@@ -1628,6 +1628,13 @@ class MainWindow(FramelessWidget):
         if menu.actions():
             menu.addSeparator()
         
+        edit_languages_action = QAction("Edit Languages", self)
+        edit_languages_action.triggered.connect(self.edit_selected_languages)
+        menu.addAction(edit_languages_action)
+        
+        if menu.actions():
+            menu.addSeparator()
+        
         move_to_top_action = QAction("Move to Top", self)
         move_to_top_action.triggered.connect(self.move_selected_to_top)
         menu.addAction(move_to_top_action)
@@ -2176,6 +2183,38 @@ class MainWindow(FramelessWidget):
             else:
                 names.append(code.upper())
         return names
+        
+    def edit_selected_languages(self):
+        selected_indexes = self.tree_view.selectionModel().selectedRows()
+        if not selected_indexes:
+            return
+        
+        current_languages = self.selected_languages.copy()
+        
+        if len(selected_indexes) == 1:
+            row = selected_indexes[0].row()
+            if 0 <= row < len(self.tasks):
+                current_languages = self.tasks[row]["languages"].copy()
+        
+        dialog = LanguageSelectionDialog(current_languages, self)
+        dialog.set_title("Edit Output Languages")
+        
+        if dialog.exec():
+            new_languages = dialog.get_selected_languages()
+            if not new_languages:
+                return
+            
+            new_lang_codes_display = ", ".join(new_languages)
+            new_language_names = self._get_language_names_from_codes(new_languages)
+            new_lang_names_display = ", ".join(new_language_names)
+            
+            for index in selected_indexes:
+                row = index.row()
+                if 0 <= row < len(self.tasks):
+                    self.tasks[row]["languages"] = new_languages.copy()
+                    
+                    self.tasks[row]["lang_item"].setText(new_lang_codes_display)
+                    self.tasks[row]["lang_item"].setToolTip(new_lang_names_display)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
