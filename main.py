@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTreeView, QLineEdit, QLabel, QFileDialog, QMessageBox,
     QComboBox, QProgressBar, QDialog, QFormLayout,
     QSpinBox, QDoubleSpinBox, QCheckBox, QDialogButtonBox, QMenu, QTextEdit,
-    QToolButton, QFrame, QStackedWidget, QStyle
+    QToolButton, QFrame, QStackedWidget, QStyle, QListWidget, QListWidgetItem
 )
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap, QPainter, QLinearGradient, QColor, QPen, QFontMetrics
 from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QTimer, QItemSelectionModel, QRect
@@ -96,6 +96,7 @@ DEFAULT_SETTINGS = {
     "gemini_api_key": "", 
     "gemini_api_key2": "", 
     "target_language": "Swedish",
+    "selected_languages": ["sv"],
     "model_name": "gemini-2.5-flash-preview-05-20",
     "output_file_naming_pattern": "{original_name}.{lang_code}.srt",
     "use_gst_parameters": False,
@@ -117,19 +118,30 @@ DEFAULT_SETTINGS = {
 }
 
 LANGUAGES = {
-    "Swedish": "Swedish", "English": "English", "Spanish": "Spanish", "French": "French",
-    "German": "German", "Italian": "Italian", "Portuguese": "Portuguese", "Dutch": "Dutch",
-    "Russian": "Russian", "Japanese": "Japanese", "Korean": "Korean", "Chinese (Simplified)": "Chinese (Simplified)",
-    "Arabic": "Arabic", "Hindi": "Hindi", "Turkish": "Turkish", "Polish": "Polish",
-    "Vietnamese": "Vietnamese", "Thai": "Thai", "Indonesian": "Indonesian", "Danish": "Danish",
-}
-
-SHORT_LANG_CODES = {
-    "Swedish": "sv", "English": "en", "Spanish": "es", "French": "fr", "German": "de",
-    "Italian": "it", "Portuguese": "pt", "Dutch": "nl", "Russian": "ru", "Japanese": "ja",
-    "Korean": "ko", "Chinese (Simplified)": "zh-CN", "Arabic": "ar", "Hindi": "hi",
-    "Turkish": "tr", "Polish": "pl", "Vietnamese": "vi", "Thai": "th", "Indonesian": "id",
-    "Danish": "da",
+    "Afrikaans": "af", "Albanian": "sq", "Amharic": "am", "Arabic": "ar",
+    "Armenian": "hy", "Azerbaijani": "az", "Basque": "eu", "Belarusian": "be",
+    "Bengali": "bn", "Bosnian": "bs", "Bulgarian": "bg", "Catalan": "ca",
+    "Cebuano": "ceb", "Chinese (Simplified)": "zh-CN", "Chinese (Traditional)": "zh-TW",
+    "Corsican": "co", "Croatian": "hr", "Czech": "cs", "Danish": "da",
+    "Dutch": "nl", "English": "en", "Estonian": "et", "Finnish": "fi",
+    "French": "fr", "Frisian": "fy", "Galician": "gl", "Georgian": "ka",
+    "German": "de", "Greek": "el", "Gujarati": "gu", "Haitian Creole": "ht",
+    "Hausa": "ha", "Hebrew": "he", "Hindi": "hi", "Hungarian": "hu",
+    "Icelandic": "is", "Igbo": "ig", "Indonesian": "id", "Italian": "it",
+    "Japanese": "ja", "Javanese": "jv", "Kannada": "kn", "Kazakh": "kk",
+    "Khmer": "km", "Korean": "ko", "Kurdish": "ku", "Kyrgyz": "ky",
+    "Lao": "lo", "Latvian": "lv", "Lithuanian": "lt", "Luxembourgish": "lb",
+    "Macedonian": "mk", "Malay": "ms", "Malayalam": "ml", "Maltese": "mt",
+    "Marathi": "mr", "Mongolian": "mn", "Myanmar": "my", "Nepali": "ne",
+    "Norwegian": "no", "Pashto": "ps", "Persian": "fa", "Polish": "pl",
+    "Brazilian Portuguese": "pt-BR", "Portuguese": "pt-PT", "Punjabi": "pa",
+    "Romanian": "ro", "Russian": "ru", "Samoan": "sm", "Serbian": "sr",
+    "Sindhi": "sd", "Sinhala": "si", "Slovak": "sk", "Slovenian": "sl",
+    "Somali": "so", "Spanish": "es", "Sundanese": "su", "Swahili": "sw",
+    "Swedish": "sv", "Tajik": "tg", "Tamil": "ta", "Telugu": "te",
+    "Thai": "th", "Turkish": "tr", "Ukrainian": "uk", "Urdu": "ur",
+    "Uzbek": "uz", "Vietnamese": "vi", "Xhosa": "xh", "Yiddish": "yi",
+    "Yoruba": "yo", "Zulu": "zu"
 }
 
 class DialogTitleBarWidget(QWidget):
@@ -773,43 +785,122 @@ class SettingsDialog(CustomFramelessDialog):
         
         return s
 
+class LanguageSelectionDialog(CustomFramelessDialog):
+    def __init__(self, selected_languages=None, parent=None):
+        super().__init__("Select Target Languages", parent)
+        self.setMinimumSize(400, 500)
+        self.selected_languages = selected_languages or ["sv"]
+        self.setup_ui()
+        
+    def setup_ui(self):
+        layout = self.get_content_layout()
+        
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Type to filter languages...")
+        self.search_input.textChanged.connect(self.filter_languages)
+        search_layout.addWidget(self.search_input)
+        layout.addLayout(search_layout)
+        
+        self.language_list = QListWidget()
+        self.language_list.setAlternatingRowColors(True)
+        layout.addWidget(self.language_list)
+        
+        self.populate_languages()
+        
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.validate_and_accept)
+        self.button_box.rejected.connect(self.reject)
+        button_layout.addWidget(self.button_box)
+        
+        layout.addLayout(button_layout)
+    
+    def populate_languages(self):
+        sorted_languages = sorted(LANGUAGES.items())
+        
+        for lang_name, lang_code in sorted_languages:
+            item = QListWidgetItem()
+            
+            checkbox = QCheckBox(f"{lang_name} ({lang_code})")
+            checkbox.setChecked(lang_code in self.selected_languages)
+            checkbox.setProperty("lang_code", lang_code)
+            
+            item.setSizeHint(checkbox.sizeHint())
+            self.language_list.addItem(item)
+            self.language_list.setItemWidget(item, checkbox)
+    
+    def filter_languages(self, search_text):
+        search_text = search_text.lower()
+        
+        for i in range(self.language_list.count()):
+            item = self.language_list.item(i)
+            checkbox = self.language_list.itemWidget(item)
+            
+            lang_text = checkbox.text().lower()
+            should_show = search_text in lang_text
+            item.setHidden(not should_show)
+    
+    def validate_and_accept(self):
+        selected = self.get_selected_languages()
+        if not selected:
+            CustomMessageBox.warning(self, "No Selection", "Please select at least one language.")
+            return
+        self.accept()
+    
+    def get_selected_languages(self):
+        selected = []
+        for i in range(self.language_list.count()):
+            item = self.language_list.item(i)
+            checkbox = self.language_list.itemWidget(item)
+            
+            if checkbox.isChecked():
+                lang_code = checkbox.property("lang_code")
+                selected.append(lang_code)
+        
+        return selected
+
 class TranslationWorker(QObject):
     finished = Signal(int, str, bool)
     progress_update = Signal(int, int, str)
     status_message = Signal(int, str)
+    language_completed = Signal(int, str, bool)
     
-    def __init__(self, task_index, input_file_path, target_language, api_key, api_key2, model_name, settings, description=""):
+    def __init__(self, task_index, input_file_path, target_languages, api_key, api_key2, model_name, settings, description=""):
         super().__init__()
         self.task_index = task_index
         self.input_file_path = input_file_path
-        self.target_language = target_language
+        self.target_languages = target_languages
         self.api_key = api_key
         self.api_key2 = api_key2
         self.model_name = model_name
         self.settings = settings
         self.description = description
         self.is_cancelled = False
-        self.process = None
+        self.current_language_index = 0
+        self.completed_languages = []
+        self.failed_languages = []
         
-    def _generate_final_filename(self):
+    def _generate_final_filename(self, lang_code):
         original_basename = os.path.basename(self.input_file_path)
         name_part, ext = os.path.splitext(original_basename)
-        target_lang_code = SHORT_LANG_CODES.get(self.target_language, self.target_language.lower())
         pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
         
-        for code in SHORT_LANG_CODES.values():
+        for code in LANGUAGES.values():
             if name_part.endswith(f".{code}"):
                 name_part = name_part[:-len(f".{code}")]
                 break
         
-        final_name = pattern.format(original_name=name_part, lang_code=target_lang_code)
+        final_name = pattern.format(original_name=name_part, lang_code=lang_code)
         return final_name
     
-    def _build_cli_command(self):
+    def _build_cli_command(self, target_language):
         cmd = ["gst", "translate"]
         
         cmd.extend(["-k", self.api_key])
-        cmd.extend(["-l", self.target_language])
+        cmd.extend(["-l", target_language])
         cmd.extend(["-i", self.input_file_path])
         cmd.extend(["-m", self.model_name])
         
@@ -823,7 +914,7 @@ class TranslationWorker(QObject):
             cmd.extend(["-o", self.settings["output_file"]])
         else:
             original_dir = os.path.dirname(self.input_file_path)
-            final_name = self._generate_final_filename()
+            final_name = self._generate_final_filename(target_language)
             output_path = os.path.join(original_dir, final_name)
             cmd.extend(["-o", output_path])
         
@@ -855,102 +946,110 @@ class TranslationWorker(QObject):
         
         return cmd
     
+    def _get_language_name(self, lang_code):
+        for name, code in LANGUAGES.items():
+            if code == lang_code:
+                return name
+        return lang_code.upper()
+    
     @Slot()
     def run(self):
         if self.is_cancelled:
             self.finished.emit(self.task_index, "Cancelled before start", False)
             return
 
-        try:
-            self.status_message.emit(self.task_index, "Preparing...")
-            cmd = self._build_cli_command()
-            env = os.environ.copy()
-            env["PYTHONIOENCODING"] = "utf-8"
-            env["PYTHONUNBUFFERED"] = "1"
-
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                env=env,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            )
-
-            self.status_message.emit(self.task_index, "Translating...")
-            self.progress_update.emit(self.task_index, 0, "Starting...")
-
-            found_completion = False
-
-            for line in iter(self.process.stdout.readline, ''):
-                if self.is_cancelled:
-                    break
-
-                line = line.strip()
-                if not line:
-                    continue
-
-                progress_match = re.search(r"Translating:\s*\|.*\|\s*(\d+)%\s*\(([^)]+)\)[^|]*\|\s*(Thinking|Processing)", line)
+        total_languages = len(self.target_languages)
+        
+        for lang_index, target_lang in enumerate(self.target_languages):
+            if self.is_cancelled:
+                break
                 
-                if progress_match:
-                    percent = int(progress_match.group(1))
-                    details = progress_match.group(2)
-                    state = progress_match.group(3)  # This will be "Thinking" or "Processing"
+            self.current_language_index = lang_index
+            lang_name = self._get_language_name(target_lang)
+            
+            try:
+                overall_progress = int((lang_index / total_languages) * 100)
+                self.status_message.emit(self.task_index, f"Translating to {lang_name}...")
+                
+                cmd = self._build_cli_command(target_lang)
+                env = os.environ.copy()
+                env["PYTHONIOENCODING"] = "utf-8"
+                env["PYTHONUNBUFFERED"] = "1"
+
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    env=env,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+
+                found_completion = False
+
+                for line in iter(process.stdout.readline, ''):
+                    if self.is_cancelled:
+                        process.terminate()
+                        break
+
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    progress_match = re.search(r"Translating:\s*\|.*\|\s*(\d+)%\s*\(([^)]+)\)[^|]*\|\s*(Thinking|Processing)", line)
                     
-                    self.progress_update.emit(self.task_index, percent, f"{state}... ({details})")
-                    continue
+                    if progress_match:
+                        lang_percent = int(progress_match.group(1))
+                        details = progress_match.group(2)
+                        state = progress_match.group(3)
+                        
+                        total_percent = overall_progress + int((lang_percent / 100) * (100 / total_languages))
+                        status_text = f"{state}... {lang_name} ({details}) - {lang_index + 1}/{total_languages}"
+                        
+                        self.progress_update.emit(self.task_index, total_percent, status_text)
+                        continue
 
-                elif "Translation completed successfully!" in line:
-                    found_completion = True
-                    self.progress_update.emit(self.task_index, 100, "Translated")
-                    break
+                    elif "Translation completed successfully!" in line:
+                        found_completion = True
+                        break
 
-            return_code = self.process.wait()
+                return_code = process.wait()
 
-            if self.is_cancelled:
-                self.finished.emit(self.task_index, "Translation cancelled", False)
-                return
+                if self.is_cancelled:
+                    self.finished.emit(self.task_index, "Translation cancelled", False)
+                    return
 
-            if return_code == 0 and found_completion:
-                self.finished.emit(self.task_index, "Translated", True)
-            else:
-                stderr_output = ""
-                try:
-                    stderr_output = self.process.stderr.read()
-                except:
-                    pass
-                
-                error_msg = f"Translation failed (code {return_code})"
-                if stderr_output:
-                    clean_error = stderr_output.strip().splitlines()[-1] if stderr_output.strip() else ""
-                    if clean_error:
-                        error_msg += f": {clean_error}"
-                self.finished.emit(self.task_index, error_msg, False)
+                if return_code == 0 and found_completion:
+                    self.completed_languages.append(target_lang)
+                    self.language_completed.emit(self.task_index, target_lang, True)
+                else:
+                    self.failed_languages.append(target_lang)
+                    self.language_completed.emit(self.task_index, target_lang, False)
 
-        except Exception as e:
-            if self.is_cancelled:
-                self.finished.emit(self.task_index, "Translation cancelled", False)
-            else:
-                error_msg = f"An unexpected error occurred: {str(e)}"
-                self.finished.emit(self.task_index, error_msg, False)
+            except Exception as e:
+                if self.is_cancelled:
+                    self.finished.emit(self.task_index, "Translation cancelled", False)
+                    return
+                else:
+                    self.failed_languages.append(target_lang)
+                    self.language_completed.emit(self.task_index, target_lang, False)
+
+        if self.is_cancelled:
+            self.finished.emit(self.task_index, "Translation cancelled", False)
+        elif len(self.completed_languages) == total_languages:
+            self.finished.emit(self.task_index, "Translated", True)
+        elif len(self.completed_languages) > 0:
+            completed_str = ", ".join(self.completed_languages)
+            failed_str = ", ".join(self.failed_languages)
+            msg = f"Partial success: {completed_str} completed, {failed_str} failed"
+            self.finished.emit(self.task_index, msg, False)
+        else:
+            self.finished.emit(self.task_index, "Translations failed", False)
     
     def cancel(self):
         self.is_cancelled = True
         self.status_message.emit(self.task_index, "Cancelling...")
-        if self.process and self.process.poll() is None:
-            try:
-                self.process.terminate()
-                QTimer.singleShot(2000, self._force_kill)
-            except:
-                pass
-    
-    def _force_kill(self):
-        if self.process and self.process.poll() is None:
-            try:
-                self.process.kill()
-            except:
-                pass
 
 class CustomLineEdit(QLineEdit):
     def __init__(self, parent=None):
@@ -1331,28 +1430,23 @@ class MainWindow(FramelessWidget):
         self.clear_btn.setEnabled(False)
         button_layout.addWidget(self.clear_btn)
         
-        self.target_lang_combo = QComboBox(controls_widget)
-        self.target_lang_combo.addItems(LANGUAGES.keys())
-        current_gst_lang_val = self.settings.get("target_language", "Swedish")
-        display_key_for_value = current_gst_lang_val
-        for k, v in LANGUAGES.items():
-            if v == current_gst_lang_val:
-                display_key_for_value = k
-                break
-        self.target_lang_combo.setCurrentText(display_key_for_value)
-        self.target_lang_combo.currentTextChanged.connect(
-            lambda text: self.settings.update({"target_language": LANGUAGES.get(text, text)})
-        )
+        self.selected_languages = self.settings.get("selected_languages", ["sv"])
+        self.language_selection_btn = HoverPushButton(get_resource_path("Files/language.svg"))
+        self.language_selection_btn.setObjectName("ControlButton")
+        self.language_selection_btn.setText("Language Selection")
+        self.language_selection_btn.setFixedWidth(150)
+        self.language_selection_btn.setFixedHeight(28)
+        self.language_selection_btn.clicked.connect(self.open_language_selection)
+        self.language_selection_btn.setParent(controls_widget)
         
         def position_controls():
-            if not hasattr(self, 'target_lang_combo') or not self.target_lang_combo:
+            if not hasattr(self, 'language_selection_btn'):
                 return
                 
             parent_width = controls_widget.width()
             
-            combo_width = self.target_lang_combo.sizeHint().width()
-            self.target_lang_combo.resize(combo_width, self.target_lang_combo.sizeHint().height())
-            self.target_lang_combo.move(parent_width - combo_width, 0)
+            btn_width = self.language_selection_btn.width()
+            self.language_selection_btn.move(parent_width - btn_width, 1)
             
             button_group.adjustSize()
             button_group_width = button_group.sizeHint().width()
@@ -1360,6 +1454,7 @@ class MainWindow(FramelessWidget):
             button_group.move(center_x, 0)
         
         original_resize = controls_widget.resizeEvent
+        
         def new_resize_event(event):
             if original_resize:
                 original_resize(event)
@@ -1472,6 +1567,17 @@ class MainWindow(FramelessWidget):
             self.tree_view.setSortingEnabled(True)
             if sort_column >= 0:
                 self.tree_view.sortByColumn(sort_column, sort_order)
+                
+    def open_language_selection(self):
+        dialog = LanguageSelectionDialog(self.selected_languages, self)
+        if dialog.exec():
+            self.selected_languages = dialog.get_selected_languages()
+            self.settings["selected_languages"] = self.selected_languages
+            self._save_settings()
+    
+    @Slot(int, str, bool)
+    def on_language_completed(self, task_idx, lang_code, success):
+        pass
 
     def show_context_menu(self, position):
         if self.active_thread and self.active_thread.isRunning():
@@ -1804,8 +1910,7 @@ class MainWindow(FramelessWidget):
             self.settings["gemini_api_key"] = self.api_key_edit.text()
             self.settings["gemini_api_key2"] = self.api_key2_edit.text()
             self.settings["model_name"] = self.model_name_edit.text()
-            current_display_lang = self.target_lang_combo.currentText()
-            self.settings["target_language"] = LANGUAGES.get(current_display_lang, current_display_lang)
+            self.settings["selected_languages"] = self.selected_languages
             
             config_dir = os.path.dirname(CONFIG_FILE)
             if not os.path.exists(config_dir):
@@ -1837,29 +1942,37 @@ class MainWindow(FramelessWidget):
     def add_files_action(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Subtitle Files", "", "SRT Files (*.srt);;All Files (*)")
         if files:
-            selected_target_lang_display = self.target_lang_combo.currentText()
-            selected_target_lang_value = LANGUAGES.get(selected_target_lang_display, selected_target_lang_display)
+            lang_codes_display = ", ".join(self.selected_languages)
             
             for file_path in files:
-                if any(task['path'] == file_path and task['lang_value'] == selected_target_lang_value for task in self.tasks):
+                if any(task['path'] == file_path and task['languages'] == self.selected_languages for task in self.tasks):
                     continue
                     
                 path_item = QStandardItem(os.path.basename(file_path))
                 path_item.setToolTip(os.path.dirname(file_path))
                 path_item.setEditable(False)
-                lang_item = QStandardItem(selected_target_lang_display)
+                
+                lang_item = QStandardItem(lang_codes_display)
                 lang_item.setEditable(False)
+                
                 desc_item = QStandardItem("")
                 desc_item.setEditable(True)
                 desc_item.setToolTip("")
+                
                 status_item = QStandardItem("Queued")
                 status_item.setEditable(False)
+                
                 self.model.appendRow([path_item, lang_item, desc_item, status_item])
                 self.tasks.append({
-                    "path": file_path, "path_item": path_item, "lang_item": lang_item,
-                    "desc_item": desc_item, "status_item": status_item, "description": "",
-                    "lang_display": selected_target_lang_display,
-                    "lang_value": selected_target_lang_value, "worker": None, "thread": None
+                    "path": file_path, 
+                    "path_item": path_item, 
+                    "lang_item": lang_item,
+                    "desc_item": desc_item, 
+                    "status_item": status_item, 
+                    "description": "",
+                    "languages": self.selected_languages.copy(),
+                    "worker": None, 
+                    "thread": None
                 })
                 
             self.update_button_states()
@@ -1908,7 +2021,7 @@ class MainWindow(FramelessWidget):
         self.active_worker = TranslationWorker(
             task_index=task_idx, 
             input_file_path=task["path"], 
-            target_language=task["lang_value"],
+            target_languages=task["languages"],
             api_key=self.api_key_edit.text().strip(), 
             api_key2=self.api_key2_edit.text().strip(),
             model_name=self.model_name_edit.text().strip(), 
@@ -1920,6 +2033,7 @@ class MainWindow(FramelessWidget):
         self.active_worker.status_message.connect(self.on_worker_status_message)
         self.active_worker.progress_update.connect(self.on_worker_progress_update)
         self.active_worker.finished.connect(self.on_worker_finished)
+        self.active_worker.language_completed.connect(self.on_language_completed)
         self.active_thread.started.connect(self.active_worker.run)
         self.active_thread.finished.connect(self.active_worker.deleteLater)
         self.active_thread.finished.connect(self.active_thread.deleteLater)
