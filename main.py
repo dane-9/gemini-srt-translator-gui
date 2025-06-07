@@ -3,6 +3,8 @@ import os
 import json
 import re
 import subprocess
+import signal
+import time
 import gemini_srt_translator as gst
 
 from PySide6.QtWidgets import (
@@ -101,14 +103,13 @@ DEFAULT_SETTINGS = {
     "output_file_naming_pattern": "{original_name}.{lang_code}.srt",
     "use_gst_parameters": False,
     "use_model_tuning": False,
-    "output_file": "", 
-    "start_line": 1, 
     "description": "", 
     "batch_size": 30,
     "free_quota": True, 
     "skip_upgrade": False, 
     "progress_log": False, 
     "thoughts_log": False,
+    "auto_resume": True,
     "temperature": 0.7, 
     "top_p": 0.95, 
     "top_k": 40, 
@@ -606,17 +607,8 @@ class SettingsDialog(CustomFramelessDialog):
         
         self.gst_content_widget = QWidget()
         gst_layout = QFormLayout(self.gst_content_widget)
-        gst_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+        gst_layout.setContentsMargins(20, 0, 0, 0)
         gst_layout.setVerticalSpacing(10)
-        
-        self.output_file_edit = QLineEdit(self.settings.get("output_file", ""))
-        gst_layout.addRow("Output File:", self.output_file_edit)
-        
-        self.start_line_spin = QSpinBox()
-        self.start_line_spin.setRange(1, 999999)
-        self.start_line_spin.setValue(self.settings.get("start_line", 1))
-        self.start_line_spin.setMaximumWidth(150)
-        gst_layout.addRow("Start Line:", self.start_line_spin)
         
         self.batch_size_spin = QSpinBox()
         self.batch_size_spin.setRange(1, 10000)
@@ -625,6 +617,7 @@ class SettingsDialog(CustomFramelessDialog):
         gst_layout.addRow("Batch Size:", self.batch_size_spin)
         
         checkbox_items = [
+            ("auto_resume", "Auto Resume:", True),
             ("free_quota", "Free Quota:", True),
             ("skip_upgrade", "Skip Upgrade:", False),
             ("progress_log", "Progress Log:", False),
@@ -657,7 +650,7 @@ class SettingsDialog(CustomFramelessDialog):
         
         self.model_content_widget = QWidget()
         model_layout = QFormLayout(self.model_content_widget)
-        model_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+        model_layout.setContentsMargins(20, 0, 0, 0)
         model_layout.setVerticalSpacing(10)
         
         self.temperature_spin = QDoubleSpinBox()
@@ -730,11 +723,10 @@ class SettingsDialog(CustomFramelessDialog):
         self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
         
         self.gst_checkbox.setChecked(False)
-        self.output_file_edit.setText("")
-        self.start_line_spin.setValue(1)
         self.batch_size_spin.setValue(30)
         
         gst_defaults = {
+            "auto_resume": True,
             "free_quota": True,
             "skip_upgrade": False,
             "progress_log": False,
@@ -767,8 +759,6 @@ class SettingsDialog(CustomFramelessDialog):
         s["output_file_naming_pattern"] = self.output_naming_pattern_edit.text().strip()
         
         s["use_gst_parameters"] = self.gst_checkbox.isChecked()
-        s["output_file"] = self.output_file_edit.text().strip()
-        s["start_line"] = self.start_line_spin.value()
         s["batch_size"] = self.batch_size_spin.value()
         
         for key, checkbox in self.gst_checkboxes.items():
@@ -882,8 +872,9 @@ class TranslationWorker(QObject):
         self.current_language_index = 0
         self.completed_languages = []
         self.failed_languages = []
+        self.process = None
         
-    def _generate_final_filename(self, lang_code):
+    def _generate_output_filename(self, lang_code):
         original_basename = os.path.basename(self.input_file_path)
         name_part, ext = os.path.splitext(original_basename)
         pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
@@ -894,7 +885,26 @@ class TranslationWorker(QObject):
                 break
         
         final_name = pattern.format(original_name=name_part, lang_code=lang_code)
-        return final_name
+        original_dir = os.path.dirname(self.input_file_path)
+        return os.path.join(original_dir, final_name)
+    
+    def _get_progress_file_path(self):
+        original_basename = os.path.basename(self.input_file_path)
+        name_part, ext = os.path.splitext(original_basename)
+        progress_filename = f"{name_part}.progress"
+        original_dir = os.path.dirname(self.input_file_path)
+        return os.path.join(original_dir, progress_filename)
+    
+    def _detect_progress_file(self):
+        progress_file = self._get_progress_file_path()
+        if os.path.exists(progress_file):
+            try:
+                with open(progress_file, 'r', encoding='utf-8') as f:
+                    progress_data = json.load(f)
+                    return progress_data.get("line", None)
+            except Exception:
+                return None
+        return None
     
     def _build_cli_command(self, target_language):
         cmd = ["gst", "translate"]
@@ -904,22 +914,22 @@ class TranslationWorker(QObject):
         cmd.extend(["-i", self.input_file_path])
         cmd.extend(["-m", self.model_name])
         
+        output_path = self._generate_output_filename(target_language)
+        cmd.extend(["-o", output_path])
+        
         if self.api_key2:
             cmd.extend(["-k2", self.api_key2])
         
         if self.description:
             cmd.extend(["-d", self.description])
         
-        if self.settings.get("use_gst_parameters", False) and self.settings.get("output_file"):
-            cmd.extend(["-o", self.settings["output_file"]])
-        else:
-            original_dir = os.path.dirname(self.input_file_path)
-            final_name = self._generate_final_filename(target_language)
-            output_path = os.path.join(original_dir, final_name)
-            cmd.extend(["-o", output_path])
+        progress_line = self._detect_progress_file()
+        should_resume = self.settings.get("auto_resume", True) and progress_line is not None
+        
+        if should_resume:
+            cmd.append("--resume")
         
         if self.settings.get("use_gst_parameters", False):
-            cmd.extend(["-s", str(self.settings.get("start_line", 1))])
             cmd.extend(["-b", str(self.settings.get("batch_size", 30))])
             
             if not self.settings.get("free_quota", True):
@@ -952,6 +962,26 @@ class TranslationWorker(QObject):
                 return name
         return lang_code.upper()
     
+    def _send_interrupt_signal(self):
+        if self.process and self.process.poll() is None:
+            try:
+                if os.name == 'nt':
+                    try:
+                        import ctypes
+                        ctypes.windll.kernel32.GenerateConsoleCtrlEvent(0, 0)
+                    except:
+                        try:
+                            self.process.send_signal(signal.SIGTERM)
+                        except:
+                            self.process.terminate()
+                else:
+                    try:
+                        self.process.send_signal(signal.SIGINT)
+                    except:
+                        self.process.send_signal(signal.SIGTERM)
+            except Exception:
+                self.process.terminate()
+    
     @Slot()
     def run(self):
         if self.is_cancelled:
@@ -969,32 +999,75 @@ class TranslationWorker(QObject):
             
             try:
                 overall_progress = int((lang_index / total_languages) * 100)
-                self.status_message.emit(self.task_index, f"Translating to {lang_name}...")
+                
+                progress_line = self._detect_progress_file()
+                if progress_line and self.settings.get("auto_resume", True):
+                    self.status_message.emit(self.task_index, f"Will resume from line {progress_line}")
+                else:
+                    self.status_message.emit(self.task_index, f"Translating to {lang_name}...")
                 
                 cmd = self._build_cli_command(target_lang)
                 env = os.environ.copy()
                 env["PYTHONIOENCODING"] = "utf-8"
                 env["PYTHONUNBUFFERED"] = "1"
 
-                process = subprocess.Popen(
+                self.process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    bufsize=1,
+                    bufsize=0,
                     env=env,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                    creationflags=0
                 )
 
                 found_completion = False
 
-                for line in iter(process.stdout.readline, ''):
+                for line in iter(self.process.stdout.readline, ''):
                     if self.is_cancelled:
-                        process.terminate()
+                        self._send_interrupt_signal()
+                        
+                        progress_saved = False
+                        timeout_counter = 0
+                        max_timeout = 50
+                        
+                        while timeout_counter < max_timeout and not progress_saved:
+                            try:
+                                stdout_line = self.process.stdout.readline()
+                                if stdout_line and "Progress saved." in stdout_line:
+                                    progress_saved = True
+                                    break
+                            except:
+                                pass
+                                
+                            try:
+                                stderr_line = self.process.stderr.readline()
+                                if stderr_line and "Progress saved." in stderr_line:
+                                    progress_saved = True
+                                    break
+                            except:
+                                pass
+                            
+                            if self.process.poll() is not None:
+                                break
+                                
+                            time.sleep(0.1)
+                            timeout_counter += 1
+                        
+                        if not progress_saved and self.process.poll() is None:
+                            self.process.terminate()
+                        
                         break
 
                     line = line.strip()
                     if not line:
+                        continue
+
+                    if "Resuming from line" in line:
+                        resume_match = re.search(r"Resuming from line (\d+)", line)
+                        if resume_match:
+                            resume_line = resume_match.group(1)
+                            self.status_message.emit(self.task_index, f"Resuming from line {resume_line}")
                         continue
 
                     progress_match = re.search(r"Translating:\s*\|.*\|\s*(\d+)%\s*\(([^)]+)\)[^|]*\|\s*(Thinking|Processing)", line)
@@ -1014,7 +1087,8 @@ class TranslationWorker(QObject):
                         found_completion = True
                         break
 
-                return_code = process.wait()
+                return_code = self.process.wait()
+                self.process = None
 
                 if self.is_cancelled:
                     self.finished.emit(self.task_index, "Translation cancelled", False)
@@ -1038,6 +1112,7 @@ class TranslationWorker(QObject):
         if self.is_cancelled:
             self.finished.emit(self.task_index, "Translation cancelled", False)
         elif len(self.completed_languages) == total_languages:
+            self._cleanup_progress_file()
             self.finished.emit(self.task_index, "Translated", True)
         elif len(self.completed_languages) > 0:
             completed_str = ", ".join(self.completed_languages)
@@ -1046,6 +1121,14 @@ class TranslationWorker(QObject):
             self.finished.emit(self.task_index, msg, False)
         else:
             self.finished.emit(self.task_index, "Translations failed", False)
+    
+    def _cleanup_progress_file(self):
+        progress_file = self._get_progress_file_path()
+        if os.path.exists(progress_file):
+            try:
+                os.remove(progress_file)
+            except Exception:
+                pass
     
     def cancel(self):
         self.is_cancelled = True
@@ -1458,7 +1541,6 @@ class MainWindow(FramelessWidget):
         
         main_layout.addWidget(content_widget)
         
-        
         self.update_button_states()
 
     def toggle_start_stop(self):
@@ -1553,6 +1635,46 @@ class MainWindow(FramelessWidget):
             self.tree_view.setSortingEnabled(True)
             if sort_column >= 0:
                 self.tree_view.sortByColumn(sort_column, sort_order)
+    
+    def _format_language_tooltip(self, lang_codes, max_display=5):
+        language_names = self._get_language_names_from_codes(lang_codes)
+        if len(language_names) <= max_display:
+            return ", ".join(language_names)
+        else:
+            displayed = ", ".join(language_names[:max_display])
+            remaining = len(language_names) - max_display
+            return f"{displayed} and {remaining} more..."
+    
+    def _cleanup_task_files(self, task):
+        original_basename = os.path.basename(task["path"])
+        name_part, ext = os.path.splitext(original_basename)
+        original_dir = os.path.dirname(task["path"])
+        
+        progress_file = os.path.join(original_dir, f"{name_part}.progress")
+        if os.path.exists(progress_file):
+            try:
+                os.remove(progress_file)
+            except Exception:
+                pass
+        
+        pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+        for code in LANGUAGES.values():
+            if name_part.endswith(f".{code}"):
+                name_part = name_part[:-len(f".{code}")]
+                break
+        
+        for lang_code in task["languages"]:
+            output_filename = pattern.format(original_name=name_part, lang_code=lang_code)
+            output_file = os.path.join(original_dir, output_filename)
+            if os.path.exists(output_file):
+                try:
+                    os.remove(output_file)
+                except Exception:
+                    pass
+    
+    def _cleanup_all_task_files(self):
+        for task in self.tasks:
+            self._cleanup_task_files(task)
                 
     def open_language_selection(self):
         dialog = LanguageSelectionDialog(self.selected_languages, self)
@@ -1563,9 +1685,8 @@ class MainWindow(FramelessWidget):
             
             if old_languages != self.selected_languages:
                 new_lang_codes_display = ", ".join(self.selected_languages)
-                new_language_names = self._get_language_names_from_codes(self.selected_languages)
                 new_lang_names_display = self._format_language_tooltip(self.selected_languages)
-
+                
                 for task in self.tasks:
                     if task["languages"] == old_languages:
                         task["lang_item"].setText(new_lang_codes_display)
@@ -1873,6 +1994,8 @@ class MainWindow(FramelessWidget):
         
         for row in rows_to_remove:
             if 0 <= row < len(self.tasks):
+                task = self.tasks[row]
+                self._cleanup_task_files(task)
                 self.tasks.pop(row)
                 self.model.removeRow(row)
         
@@ -1939,17 +2062,18 @@ class MainWindow(FramelessWidget):
                         self.active_worker.cancel()
                     self.active_thread.terminate()
                     self.active_thread.wait()
+                self._cleanup_all_task_files()
                 event.accept()
             else:
                 event.ignore()
         else:
+            self._cleanup_all_task_files()
             event.accept()
 
     def add_files_action(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Subtitle Files", "", "SRT Files (*.srt);;All Files (*)")
         if files:
             lang_codes_display = ", ".join(self.selected_languages)
-            
             lang_names_display = self._format_language_tooltip(self.selected_languages)
             
             for file_path in files:
@@ -2136,6 +2260,7 @@ class MainWindow(FramelessWidget):
             
         reply = CustomMessageBox.question(self, "Clear Queue", "Remove all items from queue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
+            self._cleanup_all_task_files()
             self.tasks.clear()
             self.model.removeRows(0, self.model.rowCount())
             self.current_task_index = -1
@@ -2183,15 +2308,6 @@ class MainWindow(FramelessWidget):
                 names.append(code.upper())
         return names
         
-    def _format_language_tooltip(self, lang_codes, max_display=5):
-        language_names = self._get_language_names_from_codes(lang_codes)
-        if len(language_names) <= max_display:
-            return ", ".join(language_names)
-        else:
-            displayed = ", ".join(language_names[:max_display])
-            remaining = len(language_names) - max_display
-            return f"{displayed} and {remaining} more..."
-        
     def edit_selected_languages(self):
         selected_indexes = self.tree_view.selectionModel().selectedRows()
         if not selected_indexes:
@@ -2224,8 +2340,11 @@ class MainWindow(FramelessWidget):
                     self.tasks[row]["lang_item"].setToolTip(new_lang_names_display)
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    app.setStyleSheet(load_stylesheet())
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+    try:
+        app = QApplication(sys.argv)
+        app.setStyleSheet(load_stylesheet())
+        window = MainWindow()
+        window.show()
+        sys.exit(app.exec())
+    except KeyboardInterrupt:
+        sys.exit(0)
