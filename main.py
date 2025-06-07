@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap, QPainter, QLinearGradient, QColor, QPen, QFontMetrics
 from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QTimer, QItemSelectionModel, QRect
-from pyqt_frameless_window import FramelessWidget
+from window import FramelessWidget
 
 def is_compiled():
     result = os.path.normcase(os.path.splitext(sys.argv[0])[1]) == '.exe'
