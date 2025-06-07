@@ -1411,8 +1411,8 @@ class MainWindow(FramelessWidget):
         
         self.add_btn = HoverPushButton(get_resource_path("Files/add.svg"))
         self.add_btn.setObjectName("ControlButton")
-        self.add_btn.setText("Add")
-        self.add_btn.setFixedWidth(100)
+        self.add_btn.setText("Add Subtitles")
+        self.add_btn.setFixedWidth(120)
         self.add_btn.setFixedHeight(28)
         self.add_btn.clicked.connect(self.add_files_action)
         button_layout.addWidget(self.add_btn)
