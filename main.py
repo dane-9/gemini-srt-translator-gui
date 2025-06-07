@@ -1150,6 +1150,12 @@ class CustomTitleBarWidget(QWidget):
         
         layout.addStretch()
         
+        self.language_selection_btn = HoverPushButton(get_resource_path("Files/language.svg"))
+        self.language_selection_btn.setObjectName("TitleBarButton")
+        self.language_selection_btn.setFixedHeight(30)
+        self.language_selection_btn.setText("Language Selection")
+        layout.addWidget(self.language_selection_btn)
+        
         self.settings_btn = HoverPushButton(get_resource_path("Files/cog.svg"))
         self.settings_btn.setObjectName("TitleBarButton")
         self.settings_btn.setFixedHeight(30)
@@ -1328,6 +1334,7 @@ class MainWindow(FramelessWidget):
             title_bar_layout.addWidget(self.custom_title_bar)
         
         self.custom_title_bar.settings_btn.clicked.connect(self.open_settings_dialog)
+        self.custom_title_bar.language_selection_btn.clicked.connect(self.open_language_selection)
         
         main_layout = self.layout()
         
@@ -1393,7 +1400,12 @@ class MainWindow(FramelessWidget):
         controls_widget = QWidget()
         controls_widget.setFixedHeight(30)
         
-        button_group = QWidget(controls_widget)
+        controls_layout = QHBoxLayout(controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        
+        controls_layout.addStretch()
+        
+        button_group = QWidget()
         button_layout = QHBoxLayout(button_group)
         button_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -1430,38 +1442,11 @@ class MainWindow(FramelessWidget):
         self.clear_btn.setEnabled(False)
         button_layout.addWidget(self.clear_btn)
         
+        controls_layout.addWidget(button_group)
+        
+        controls_layout.addStretch()
+        
         self.selected_languages = self.settings.get("selected_languages", ["sv"])
-        self.language_selection_btn = HoverPushButton(get_resource_path("Files/language.svg"))
-        self.language_selection_btn.setObjectName("ControlButton")
-        self.language_selection_btn.setText("Language Selection")
-        self.language_selection_btn.setFixedWidth(150)
-        self.language_selection_btn.setFixedHeight(28)
-        self.language_selection_btn.clicked.connect(self.open_language_selection)
-        self.language_selection_btn.setParent(controls_widget)
-        
-        def position_controls():
-            if not hasattr(self, 'language_selection_btn'):
-                return
-                
-            parent_width = controls_widget.width()
-            
-            btn_width = self.language_selection_btn.width()
-            self.language_selection_btn.move(parent_width - btn_width, 1)
-            
-            button_group.adjustSize()
-            button_group_width = button_group.sizeHint().width()
-            center_x = (parent_width - button_group_width) // 2
-            button_group.move(center_x, 0)
-        
-        original_resize = controls_widget.resizeEvent
-        
-        def new_resize_event(event):
-            if original_resize:
-                original_resize(event)
-            position_controls()
-        controls_widget.resizeEvent = new_resize_event
-        
-        QTimer.singleShot(0, position_controls)
         
         self.overall_progress_bar = QProgressBar()
         self.overall_progress_bar.setTextVisible(True)
@@ -1472,6 +1457,7 @@ class MainWindow(FramelessWidget):
         content_layout.addWidget(controls_widget)
         
         main_layout.addWidget(content_widget)
+        
         
         self.update_button_states()
 
