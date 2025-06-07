@@ -787,7 +787,7 @@ class SettingsDialog(CustomFramelessDialog):
 
 class LanguageSelectionDialog(CustomFramelessDialog):
     def __init__(self, selected_languages=None, parent=None):
-        super().__init__("Select Target Languages", parent)
+        super().__init__("Select Output Languages", parent)
         self.setMinimumSize(400, 500)
         self.selected_languages = selected_languages or ["sv"]
         self.setup_ui()
@@ -1373,7 +1373,7 @@ class MainWindow(FramelessWidget):
         self.tree_view.customContextMenuRequested.connect(self.show_context_menu)
         self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
         self.model = QStandardItemModel()
-        self.model.setHorizontalHeaderLabels(["File Name", "Target Language", "Description", "Status"])
+        self.model.setHorizontalHeaderLabels(["File Name", "Output Languages", "Description", "Status"])
         self.model.itemChanged.connect(self.on_item_changed)
         self.tree_view.setModel(self.model)
         self.tree_view.setColumnWidth(0, 480)
@@ -1554,7 +1554,7 @@ class MainWindow(FramelessWidget):
         self.tree_view.setSortingEnabled(False)
         
         self.model.clear()
-        self.model.setHorizontalHeaderLabels(["File Name", "Target Language", "Description", "Status"])
+        self.model.setHorizontalHeaderLabels(["File Name", "Output Languages", "Description", "Status"])
         
         for task in self.tasks:
             self.model.appendRow([task["path_item"], task["lang_item"], task["desc_item"], task["status_item"]])
