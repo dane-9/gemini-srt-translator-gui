@@ -1564,8 +1564,8 @@ class MainWindow(FramelessWidget):
             if old_languages != self.selected_languages:
                 new_lang_codes_display = ", ".join(self.selected_languages)
                 new_language_names = self._get_language_names_from_codes(self.selected_languages)
-                new_lang_names_display = ", ".join(new_language_names)
-                
+                new_lang_names_display = self._format_language_tooltip(self.selected_languages)
+
                 for task in self.tasks:
                     if task["languages"] == old_languages:
                         task["lang_item"].setText(new_lang_codes_display)
@@ -1950,8 +1950,7 @@ class MainWindow(FramelessWidget):
         if files:
             lang_codes_display = ", ".join(self.selected_languages)
             
-            language_names = self._get_language_names_from_codes(self.selected_languages)
-            lang_names_display = ", ".join(language_names)
+            lang_names_display = self._format_language_tooltip(self.selected_languages)
             
             for file_path in files:
                 if any(task['path'] == file_path and task['languages'] == self.selected_languages for task in self.tasks):
@@ -2184,6 +2183,15 @@ class MainWindow(FramelessWidget):
                 names.append(code.upper())
         return names
         
+    def _format_language_tooltip(self, lang_codes, max_display=5):
+        language_names = self._get_language_names_from_codes(lang_codes)
+        if len(language_names) <= max_display:
+            return ", ".join(language_names)
+        else:
+            displayed = ", ".join(language_names[:max_display])
+            remaining = len(language_names) - max_display
+            return f"{displayed} and {remaining} more..."
+        
     def edit_selected_languages(self):
         selected_indexes = self.tree_view.selectionModel().selectedRows()
         if not selected_indexes:
@@ -2205,8 +2213,7 @@ class MainWindow(FramelessWidget):
                 return
             
             new_lang_codes_display = ", ".join(new_languages)
-            new_language_names = self._get_language_names_from_codes(new_languages)
-            new_lang_names_display = ", ".join(new_language_names)
+            new_lang_names_display = self._format_language_tooltip(new_languages)
             
             for index in selected_indexes:
                 row = index.row()
