@@ -902,7 +902,7 @@ class SettingsDialog(CustomFramelessDialog):
         budget_layout.setContentsMargins(20, 0, 0, 0)
         
         self.thinking_budget_spin = QSpinBox()
-        self.thinking_budget_spin.setRange(0, 24576)
+        self.thinking_budget_spin.setRange(0, 32768)
         self.thinking_budget_spin.setValue(self.settings.get("thinking_budget", 2048))
         self.thinking_budget_spin.setMaximumWidth(150)
         budget_layout.addRow("Budget:", self.thinking_budget_spin)
