@@ -2486,6 +2486,12 @@ class MainWindow(FramelessWidget):
         if not self.queue_manager.has_any_work_remaining():
             CustomMessageBox.information(self, "Queue Status", "No work remaining in queue.")
             return
+            
+        self.model.blockSignals(True)
+        for task in self.tasks:
+            if task.get("desc_item"):
+                task["desc_item"].setEditable(False)
+        self.model.blockSignals(False)
         
         first_task_with_work = -1
         for i, task_data in enumerate(self.tasks):
@@ -2558,6 +2564,7 @@ class MainWindow(FramelessWidget):
         self.is_running = False
         self.update_button_states()
         self.current_task_index = -1
+        self._set_queue_items_editable(True)
 
     @Slot(int, str)
     def on_worker_status_message(self, task_idx, message):
@@ -2620,6 +2627,7 @@ class MainWindow(FramelessWidget):
         
         self.is_running = False
         self.update_button_states()
+        self._set_queue_items_editable(True)
     
     @Slot()
     def clear_queue_action(self):
@@ -2739,6 +2747,13 @@ class MainWindow(FramelessWidget):
                         self.tasks[row]["description"],
                         self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
                     )
+                    
+    def _set_queue_items_editable(self, is_editable):
+        self.model.blockSignals(True)
+        for task in self.tasks:
+            if task.get("desc_item"):
+                task["desc_item"].setEditable(is_editable)
+        self.model.blockSignals(False)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
