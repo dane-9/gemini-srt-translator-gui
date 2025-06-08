@@ -97,8 +97,8 @@ CONFIG_FILE = get_resource_path("Files/config.json").replace("\\", "/")
 DEFAULT_SETTINGS = {
     "gemini_api_key": "", 
     "gemini_api_key2": "", 
-    "target_language": "Swedish",
-    "selected_languages": ["sv"],
+    "target_language": "English",
+    "selected_languages": ["en"],
     "model_name": "gemini-2.5-flash-preview-05-20",
     "output_file_naming_pattern": "{original_name}.{lang_code}.srt",
     "update_existing_queue_languages": False,
