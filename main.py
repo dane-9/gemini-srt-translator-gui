@@ -102,6 +102,7 @@ DEFAULT_SETTINGS = {
     "model_name": "gemini-2.5-flash-preview-05-20",
     "output_file_naming_pattern": "{original_name}.{lang_code}.srt",
     "update_existing_queue_languages": False,
+    "queue_on_exit": "clear_if_translated",
     "use_gst_parameters": False,
     "use_model_tuning": False,
     "description": "", 
@@ -767,6 +768,19 @@ class SettingsDialog(CustomFramelessDialog):
         self.output_naming_pattern_edit = QLineEdit(self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt"))
         form_layout.addRow("Output Naming Pattern:", self.output_naming_pattern_edit)
         
+        self.queue_on_exit_combo = QComboBox()
+        self.queue_on_exit_combo.addItem("Clear Queue", "clear")
+        self.queue_on_exit_combo.addItem("Clear Queue if all Translated", "clear_if_translated")
+        self.queue_on_exit_combo.addItem("Don't Clear Queue", "keep")
+        
+        current_setting = self.settings.get("queue_on_exit", "clear_if_translated")
+        for i in range(self.queue_on_exit_combo.count()):
+            if self.queue_on_exit_combo.itemData(i) == current_setting:
+                self.queue_on_exit_combo.setCurrentIndex(i)
+                break
+        
+        form_layout.addRow("Queue on Exit:", self.queue_on_exit_combo)
+        
         main_layout.addLayout(form_layout)
         
         self.auto_resume_checkbox = QCheckBox("Resume Stopped Translations")
@@ -907,6 +921,7 @@ class SettingsDialog(CustomFramelessDialog):
     
     def reset_defaults(self):
         self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
+        self.queue_on_exit_combo.setCurrentIndex(1)
         self.auto_resume_checkbox.setChecked(True)
         self.update_queue_languages_checkbox.setChecked(True)
         
@@ -944,6 +959,7 @@ class SettingsDialog(CustomFramelessDialog):
         s = self.settings.copy()
         
         s["output_file_naming_pattern"] = self.output_naming_pattern_edit.text().strip()
+        s["queue_on_exit"] = self.queue_on_exit_combo.currentData()
         s["auto_resume"] = self.auto_resume_checkbox.isChecked()
         s["update_existing_queue_languages"] = self.update_queue_languages_checkbox.isChecked()
         
@@ -2348,13 +2364,32 @@ class MainWindow(FramelessWidget):
     def closeEvent(self, event):
         self._save_settings()
         if self.active_thread and self.active_thread.isRunning():
+            queue_on_exit = self.settings.get("queue_on_exit", "clear_if_translated")
+            
+            if queue_on_exit == "clear":
+                secondary_text = "Queue will stop gracefully but queue will be cleared on exit."
+            elif queue_on_exit == "clear_if_translated":
+                all_translated = True
+                for task in self.tasks:
+                    summary = self.queue_manager.get_language_progress_summary(task["path"])
+                    if summary != "Translated":
+                        all_translated = False
+                        break
+                
+                if all_translated:
+                    secondary_text = "Queue will stop gracefully and queue will be cleared on exit."
+                else:
+                    secondary_text = "Queue will stop gracefully and progress will be saved."
+            else:
+                secondary_text = "Queue will stop gracefully and progress will be saved."
+            
             reply = CustomMessageBox.question(
                 self, 
                 'Confirm Exit', 
                 "Translation in progress. Stop and exit?",
                 QMessageBox.Yes | QMessageBox.No, 
                 QMessageBox.No,
-                "Queue will stop gracefully and progress will be saved."
+                secondary_text
             )
             if reply == QMessageBox.Yes:
                 self.stop_translation_action()
@@ -2378,8 +2413,28 @@ class MainWindow(FramelessWidget):
             self.close()
     
     def _perform_exit(self):
-        if not self.settings.get("auto_resume", True):
+        queue_on_exit = self.settings.get("queue_on_exit", "clear_if_translated")
+        auto_resume = self.settings.get("auto_resume", True)
+        
+        if queue_on_exit == "clear":
             self._cleanup_all_task_files()
+            self.queue_manager.clear_all_state()
+        elif queue_on_exit == "clear_if_translated":
+            all_translated = True
+            for task in self.tasks:
+                summary = self.queue_manager.get_language_progress_summary(task["path"])
+                if summary != "Translated":
+                    all_translated = False
+                    break
+            
+            if all_translated:
+                self._cleanup_all_task_files()
+                self.queue_manager.clear_all_state()
+            elif not auto_resume:
+                self._cleanup_all_task_files()
+        elif queue_on_exit == "keep":
+            if not auto_resume:
+                self._cleanup_all_task_files()
 
     def add_files_action(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Subtitle Files", "", "SRT Files (*.srt);;All Files (*)")
