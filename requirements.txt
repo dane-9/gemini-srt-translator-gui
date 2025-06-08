@@ -1,3 +1,2 @@
 PySide6>=6.8.1.1
-pyqt-frameless-window>=0.0.85
 gemini-srt-translator>=2.1.0
