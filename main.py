@@ -124,7 +124,7 @@ LANGUAGES = {
     "Afrikaans": "af", "Albanian": "sq", "Amharic": "am", "Arabic": "ar",
     "Armenian": "hy", "Azerbaijani": "az", "Basque": "eu", "Belarusian": "be",
     "Bengali": "bn", "Bosnian": "bs", "Bulgarian": "bg", "Catalan": "ca",
-    "Cebuano": "ceb", "Chinese (Simplified)": "zh", "Chinese (Traditional)": "zh",
+    "Cebuano": "ceb", "Chinese (Simplified)": "zh-CN", "Chinese (Traditional)": "zh-TW",
     "Corsican": "co", "Croatian": "hr", "Czech": "cs", "Danish": "da",
     "Dutch": "nl", "English": "en", "Estonian": "et", "Finnish": "fi",
     "French": "fr", "Frisian": "fy", "Galician": "gl", "Georgian": "ka",
@@ -137,7 +137,7 @@ LANGUAGES = {
     "Macedonian": "mk", "Malay": "ms", "Malayalam": "ml", "Maltese": "mt",
     "Marathi": "mr", "Mongolian": "mn", "Myanmar": "my", "Nepali": "ne",
     "Norwegian": "no", "Pashto": "ps", "Persian": "fa", "Polish": "pl",
-    "Brazilian Portuguese": "pt", "Portuguese": "pt", "Punjabi": "pa",
+    "Brazilian Portuguese": "pt-BR", "Portuguese": "pt-PT", "Punjabi": "pa",
     "Romanian": "ro", "Russian": "ru", "Samoan": "sm", "Serbian": "sr",
     "Sindhi": "sd", "Sinhala": "si", "Slovak": "sk", "Slovenian": "sl",
     "Somali": "so", "Spanish": "es", "Sundanese": "su", "Swahili": "sw",
@@ -1142,13 +1142,19 @@ class TranslationWorker(QObject):
         original_basename = os.path.basename(self.input_file_path)
         name_part, ext = os.path.splitext(original_basename)
         pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
-        
+
+        file_lang_code = lang_code
+        if file_lang_code.startswith('zh'):
+            file_lang_code = 'zh'
+        elif file_lang_code.startswith('pt'):
+            file_lang_code = 'pt'
+    
         for code in LANGUAGES.values():
             if name_part.endswith(f".{code}"):
                 name_part = name_part[:-len(f".{code}")]
                 break
         
-        final_name = pattern.format(original_name=name_part, lang_code=lang_code)
+        final_name = pattern.format(original_name=name_part, lang_code=file_lang_code)
         original_dir = os.path.dirname(self.input_file_path)
         return os.path.join(original_dir, final_name)
     
