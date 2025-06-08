@@ -496,3 +496,15 @@ QTabBar::tab:selected, QTabBar::tab:hover {
     background: #555555;
     color: #FFFFFF;
 }
+
+QLabel#DialogMainText {
+    font-size: 13px;
+    color: #A0A0A0;
+    padding: 5px;
+}
+
+QLabel#DialogSecondaryText {
+    font-size: 11px;
+    color: #666666;
+    padding: 2px 5px;
+}

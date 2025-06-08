@@ -570,7 +570,7 @@ class CustomFramelessDialog(FramelessWidget):
         super().closeEvent(event)
 
 class CustomMessageBox(CustomFramelessDialog):
-    def __init__(self, icon_type, title, text, buttons=QMessageBox.Ok, parent=None):
+    def __init__(self, icon_type, title, text, buttons=QMessageBox.Ok, parent=None, secondary_text=None):
         super().__init__(title, parent)
         self.setMinimumSize(300, 150)
         self.result_value = QMessageBox.Cancel
@@ -598,11 +598,25 @@ class CustomMessageBox(CustomFramelessDialog):
         icon_label.setFixedSize(icon_size + 10, icon_size + 10)
         message_layout.addWidget(icon_label)
         
+        text_container = QWidget()
+        text_layout = QVBoxLayout(text_container)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(8)
+        
         text_label = QLabel(text)
+        text_label.setObjectName("DialogMainText")
         text_label.setWordWrap(True)
         text_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        text_label.setStyleSheet("font-size: 13px; color: #333; padding: 5px;")
-        message_layout.addWidget(text_label, 1)
+        text_layout.addWidget(text_label)
+        
+        if secondary_text:
+            secondary_label = QLabel(secondary_text)
+            secondary_label.setObjectName("DialogSecondaryText")
+            secondary_label.setWordWrap(True)
+            secondary_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            text_layout.addWidget(secondary_label)
+        
+        message_layout.addWidget(text_container, 1)
         
         layout.addLayout(message_layout)
         layout.addStretch()
@@ -636,23 +650,23 @@ class CustomMessageBox(CustomFramelessDialog):
         return self.result_value
     
     @staticmethod
-    def question(parent, title, text, buttons=QMessageBox.Yes | QMessageBox.No, default_button=QMessageBox.No):
-        dialog = CustomMessageBox(QMessageBox.Question, title, text, buttons, parent)
+    def question(parent, title, text, buttons=QMessageBox.Yes | QMessageBox.No, default_button=QMessageBox.No, secondary_text=None):
+        dialog = CustomMessageBox(QMessageBox.Question, title, text, buttons, parent, secondary_text)
         return dialog.exec()
     
     @staticmethod
-    def warning(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok):
-        dialog = CustomMessageBox(QMessageBox.Warning, title, text, buttons, parent)
+    def warning(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok, secondary_text=None):
+        dialog = CustomMessageBox(QMessageBox.Warning, title, text, buttons, parent, secondary_text)
         return dialog.exec()
     
     @staticmethod
-    def information(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok):
-        dialog = CustomMessageBox(QMessageBox.Information, title, text, buttons, parent)
+    def information(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok, secondary_text=None):
+        dialog = CustomMessageBox(QMessageBox.Information, title, text, buttons, parent, secondary_text)
         return dialog.exec()
     
     @staticmethod
-    def critical(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok):
-        dialog = CustomMessageBox(QMessageBox.Critical, title, text, buttons, parent)
+    def critical(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.Ok, secondary_text=None):
+        dialog = CustomMessageBox(QMessageBox.Critical, title, text, buttons, parent, secondary_text)
         return dialog.exec()
 
 class BulkDescriptionDialog(CustomFramelessDialog):
@@ -1619,6 +1633,7 @@ class MainWindow(FramelessWidget):
         self.active_worker = None
         self.clipboard_description = ""
         self.is_running = False
+        self._exit_timer = None
         
         title_bar = self.getTitleBar()
         title_bar.setTitleBarFont(QFont('Arial', 12))
@@ -2333,26 +2348,38 @@ class MainWindow(FramelessWidget):
     def closeEvent(self, event):
         self._save_settings()
         if self.active_thread and self.active_thread.isRunning():
-            reply = CustomMessageBox.question(self, 'Confirm Exit', "Translation in progress. Stop and exit?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            reply = CustomMessageBox.question(
+                self, 
+                'Confirm Exit', 
+                "Translation in progress. Stop and exit?",
+                QMessageBox.Yes | QMessageBox.No, 
+                QMessageBox.No,
+                "Queue will stop gracefully and progress will be saved."
+            )
             if reply == QMessageBox.Yes:
-                self.stop_translation_action(force_quit=True)
-                if self.active_thread and not self.active_thread.wait(3000):
-                    CustomMessageBox.warning(self, "Exiting", "Thread did not stop gracefully. Forcing exit.")
-                    if self.active_worker:
-                        self.active_worker.cancel()
-                    self.active_thread.terminate()
-                    self.active_thread.wait()
+                self.stop_translation_action()
                 
-                if not self.settings.get("auto_resume", True):
-                    self._cleanup_all_task_files()
+                self._exit_timer = QTimer()
+                self._exit_timer.timeout.connect(lambda: self._check_translation_stopped(event))
+                self._exit_timer.start(100)
                 
-                event.accept()
+                event.ignore()
             else:
                 event.ignore()
         else:
-            if not self.settings.get("auto_resume", True):
-                self._cleanup_all_task_files()
+            self._perform_exit()
             event.accept()
+    
+    def _check_translation_stopped(self, event):
+        if not self.is_running and (not self.active_thread or not self.active_thread.isRunning()):
+            self._exit_timer.stop()
+            self._exit_timer = None
+            self._perform_exit()
+            self.close()
+    
+    def _perform_exit(self):
+        if not self.settings.get("auto_resume", True):
+            self._cleanup_all_task_files()
 
     def add_files_action(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Subtitle Files", "", "SRT Files (*.srt);;All Files (*)")
