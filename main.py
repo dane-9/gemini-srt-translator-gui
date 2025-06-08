@@ -106,7 +106,7 @@ DEFAULT_SETTINGS = {
     "use_gst_parameters": False,
     "use_model_tuning": False,
     "description": "", 
-    "batch_size": 30,
+    "batch_size": 300,
     "free_quota": True, 
     "skip_upgrade": False, 
     "progress_log": False, 
