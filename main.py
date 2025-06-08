@@ -1621,10 +1621,6 @@ class CustomTitleBarWidget(QWidget):
     def close_window(self):
         if self.parent_window:
             self.parent_window.close()
-    
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.toggle_maximize()
 
 class MainWindow(FramelessWidget):
     def __init__(self):
