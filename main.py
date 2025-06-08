@@ -55,7 +55,7 @@ def load_colored_svg(svg_path, color="#A0A0A0"):
 
 def load_stylesheet():
     try:
-        qss_file_path = get_resource_path("dark.qss")
+        qss_file_path = get_resource_path("Files/dark.qss").replace("\\", "/")
         with open(qss_file_path, 'r', encoding='utf-8') as f:
             qss = f.read()
         
@@ -92,7 +92,7 @@ def load_stylesheet():
         print(f"Error loading dark.qss: {e}")
         return ""
 
-CONFIG_FILE = get_resource_path("config.json")
+CONFIG_FILE = get_resource_path("Files/config.json").replace("\\", "/")
 
 DEFAULT_SETTINGS = {
     "gemini_api_key": "", 
@@ -1788,7 +1788,7 @@ class MainWindow(FramelessWidget):
         
         main_layout.addWidget(content_widget)
         
-        queue_state_file = get_resource_path("queue_state.json")
+        queue_state_file = get_resource_path("Files/queue_state.json").replace("\\", "/")
         self.queue_manager = QueueStateManager(queue_state_file)
         
         self._sync_ui_with_queue_state()
