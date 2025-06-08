@@ -307,6 +307,41 @@ class QueueStateManager:
     def clear_all_state(self):
         self.state = {"queue_state": {}}
         self._save_queue_state()
+        
+    def update_subtitle_languages(self, subtitle_path, new_languages, description, output_pattern):
+        if subtitle_path in self.state["queue_state"]:
+            old_entry = self.state["queue_state"][subtitle_path]
+            
+            self.state["queue_state"][subtitle_path] = {
+                "languages": {},
+                "description": description,
+                "target_languages": new_languages.copy(),
+                "output_pattern": output_pattern
+            }
+            
+            subtitle_dir = os.path.dirname(subtitle_path)
+            subtitle_basename = os.path.basename(subtitle_path)
+            name_part, ext = os.path.splitext(subtitle_basename)
+            
+            for code in LANGUAGES.values():
+                if name_part.endswith(f".{code}"):
+                    name_part = name_part[:-len(f".{code}")]
+                    break
+            
+            for lang_code in new_languages:
+                output_filename = output_pattern.format(original_name=name_part, lang_code=lang_code)
+                output_path = os.path.join(subtitle_dir, output_filename)
+                
+                old_status = "queued"
+                if lang_code in old_entry.get("languages", {}):
+                    old_status = old_entry["languages"][lang_code].get("status", "queued")
+                
+                self.state["queue_state"][subtitle_path]["languages"][lang_code] = {
+                    "status": old_status,
+                    "output_file": output_path
+                }
+            
+            self._save_queue_state()
 
 class DialogTitleBarWidget(QWidget):
     def __init__(self, title="Dialog", parent=None):
@@ -811,7 +846,6 @@ class SettingsDialog(CustomFramelessDialog):
         gst_layout.setContentsMargins(20, 0, 0, 0)
         gst_layout.setSpacing(10)
         
-        # Form layout for batch size
         form_layout = QFormLayout()
         self.batch_size_spin = QSpinBox()
         self.batch_size_spin.setRange(1, 10000)
@@ -2032,6 +2066,13 @@ class MainWindow(FramelessWidget):
                         task["lang_item"].setText(new_lang_display)
                         task["lang_item"].setToolTip(new_lang_tooltip)
                         task["languages"] = self.selected_languages.copy()
+                        
+                        self.queue_manager.update_subtitle_languages(
+                            task["path"], 
+                            self.selected_languages, 
+                            task["description"],
+                            self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+                        )
             
             self._save_settings()
     
@@ -2682,12 +2723,19 @@ class MainWindow(FramelessWidget):
         self.clear_btn.setEnabled(has_any_tasks and not is_processing and not self.is_running)
         
     def _get_language_names_from_codes(self, lang_codes):
+        unique_codes = list(dict.fromkeys(lang_codes))
         names = []
-        for code in lang_codes:
+        for code in unique_codes:
+            found_names = []
             for name, lang_code in LANGUAGES.items():
                 if lang_code == code:
-                    names.append(name)
-                    break
+                    found_names.append(name)
+            
+            if found_names:
+                if len(found_names) == 1:
+                    names.append(found_names[0])
+                else:
+                    names.extend(found_names)
             else:
                 names.append(code.upper())
         return names
@@ -2735,9 +2783,15 @@ class MainWindow(FramelessWidget):
                 row = index.row()
                 if 0 <= row < len(self.tasks):
                     self.tasks[row]["languages"] = new_languages.copy()
-                    
                     self.tasks[row]["lang_item"].setText(new_lang_display)
                     self.tasks[row]["lang_item"].setToolTip(new_lang_tooltip)
+                    
+                    self.queue_manager.update_subtitle_languages(
+                        self.tasks[row]["path"], 
+                        new_languages, 
+                        self.tasks[row]["description"],
+                        self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+                    )
 
 if __name__ == "__main__":
     try:
