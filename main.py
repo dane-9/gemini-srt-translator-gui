@@ -807,29 +807,32 @@ class SettingsDialog(CustomFramelessDialog):
         layout.addWidget(self.gst_checkbox)
         
         self.gst_content_widget = QWidget()
-        gst_layout = QFormLayout(self.gst_content_widget)
+        gst_layout = QVBoxLayout(self.gst_content_widget)
         gst_layout.setContentsMargins(20, 0, 0, 0)
-        gst_layout.setVerticalSpacing(10)
+        gst_layout.setSpacing(10)
         
+        # Form layout for batch size
+        form_layout = QFormLayout()
         self.batch_size_spin = QSpinBox()
         self.batch_size_spin.setRange(1, 10000)
         self.batch_size_spin.setValue(self.settings.get("batch_size", 30))
         self.batch_size_spin.setMaximumWidth(150)
-        gst_layout.addRow("Batch Size:", self.batch_size_spin)
+        form_layout.addRow("Batch Size:", self.batch_size_spin)
+        gst_layout.addLayout(form_layout)
         
         checkbox_items = [
-            ("free_quota", "Free Quota:", True),
-            ("skip_upgrade", "Skip Upgrade:", False),
-            ("progress_log", "Progress Log:", False),
-            ("thoughts_log", "Thoughts Log:", False)
+            ("free_quota", "Free Quota", True),
+            ("skip_upgrade", "Skip Upgrade", False),
+            ("progress_log", "Progress Log", False),
+            ("thoughts_log", "Thoughts Log", False)
         ]
         
         self.gst_checkboxes = {}
         for setting_key, label_text, default_value in checkbox_items:
-            checkbox = QCheckBox()
+            checkbox = QCheckBox(label_text)
             checkbox.setChecked(self.settings.get(setting_key, default_value))
             self.gst_checkboxes[setting_key] = checkbox
-            gst_layout.addRow(label_text, checkbox)
+            gst_layout.addWidget(checkbox)
         
         layout.addWidget(self.gst_content_widget)
         layout.addStretch()
@@ -849,9 +852,12 @@ class SettingsDialog(CustomFramelessDialog):
         layout.addWidget(self.model_checkbox)
         
         self.model_content_widget = QWidget()
-        model_layout = QFormLayout(self.model_content_widget)
+        model_layout = QVBoxLayout(self.model_content_widget)
         model_layout.setContentsMargins(20, 0, 0, 0)
-        model_layout.setVerticalSpacing(10)
+        model_layout.setSpacing(10)
+        
+        form_layout = QFormLayout()
+        form_layout.setVerticalSpacing(10)
         
         self.temperature_spin = QDoubleSpinBox()
         self.temperature_spin.setRange(0.0, 2.0)
@@ -859,7 +865,7 @@ class SettingsDialog(CustomFramelessDialog):
         self.temperature_spin.setValue(self.settings.get("temperature", 0.7))
         self.temperature_spin.setDecimals(1)
         self.temperature_spin.setMaximumWidth(150)
-        model_layout.addRow("Temperature:", self.temperature_spin)
+        form_layout.addRow("Temperature:", self.temperature_spin)
         
         self.top_p_spin = QDoubleSpinBox()
         self.top_p_spin.setRange(0.0, 1.0)
@@ -867,31 +873,33 @@ class SettingsDialog(CustomFramelessDialog):
         self.top_p_spin.setValue(self.settings.get("top_p", 0.95))
         self.top_p_spin.setDecimals(2)
         self.top_p_spin.setMaximumWidth(150)
-        model_layout.addRow("Top P:", self.top_p_spin)
+        form_layout.addRow("Top P:", self.top_p_spin)
         
         self.top_k_spin = QSpinBox()
         self.top_k_spin.setRange(0, 1000)
         self.top_k_spin.setValue(self.settings.get("top_k", 40))
         self.top_k_spin.setMaximumWidth(150)
-        model_layout.addRow("Top K:", self.top_k_spin)
-        
-        model_checkbox_items = [
-            ("streaming", "Streaming:", True),
-            ("thinking", "Thinking:", True)
-        ]
-        
-        self.model_checkboxes = {}
-        for setting_key, label_text, default_value in model_checkbox_items:
-            checkbox = QCheckBox()
-            checkbox.setChecked(self.settings.get(setting_key, default_value))
-            self.model_checkboxes[setting_key] = checkbox
-            model_layout.addRow(label_text, checkbox)
+        form_layout.addRow("Top K:", self.top_k_spin)
         
         self.thinking_budget_spin = QSpinBox()
         self.thinking_budget_spin.setRange(0, 24576)
         self.thinking_budget_spin.setValue(self.settings.get("thinking_budget", 2048))
         self.thinking_budget_spin.setMaximumWidth(150)
-        model_layout.addRow("Thinking Budget:", self.thinking_budget_spin)
+        form_layout.addRow("Thinking Budget:", self.thinking_budget_spin)
+        
+        model_layout.addLayout(form_layout)
+        
+        model_checkbox_items = [
+            ("streaming", "Streaming", True),
+            ("thinking", "Thinking", True)
+        ]
+        
+        self.model_checkboxes = {}
+        for setting_key, label_text, default_value in model_checkbox_items:
+            checkbox = QCheckBox(label_text)
+            checkbox.setChecked(self.settings.get(setting_key, default_value))
+            self.model_checkboxes[setting_key] = checkbox
+            model_layout.addWidget(checkbox)
         
         layout.addWidget(self.model_content_widget)
         layout.addStretch()
