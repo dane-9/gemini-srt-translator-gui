@@ -1843,15 +1843,15 @@ class MainWindow(FramelessWidget):
                             break
     
     def _add_task_to_ui(self, file_path, languages, description):
-        lang_codes_display = ", ".join(languages)
-        lang_names_display = self._format_language_tooltip(languages)
+        lang_display = self._get_language_display_text(languages)
+        lang_tooltip = self._format_language_tooltip(languages)
         
         path_item = QStandardItem(os.path.basename(file_path))
         path_item.setToolTip(os.path.dirname(file_path))
         path_item.setEditable(False)
         
-        lang_item = QStandardItem(lang_codes_display)
-        lang_item.setToolTip(lang_names_display)
+        lang_item = QStandardItem(lang_display)
+        lang_item.setToolTip(lang_tooltip)
         lang_item.setEditable(False)
         
         desc_item = QStandardItem(description)
@@ -1873,6 +1873,13 @@ class MainWindow(FramelessWidget):
             "worker": None, 
             "thread": None
         })
+        
+    def _get_language_display_text(self, lang_codes):
+        if len(lang_codes) <= 2:
+            language_names = self._get_language_names_from_codes(lang_codes)
+            return ", ".join(language_names)
+        else:
+            return ", ".join(lang_codes)
 
     def toggle_start_stop(self):
         if self.is_running:
@@ -2017,13 +2024,13 @@ class MainWindow(FramelessWidget):
             if (old_languages != self.selected_languages and 
                 self.settings.get("update_existing_queue_languages", True)):
                 
-                new_lang_codes_display = ", ".join(self.selected_languages)
-                new_lang_names_display = self._format_language_tooltip(self.selected_languages)
+                new_lang_display = self._get_language_display_text(self.selected_languages)
+                new_lang_tooltip = self._format_language_tooltip(self.selected_languages)
                 
                 for task in self.tasks:
                     if task["languages"] == old_languages:
-                        task["lang_item"].setText(new_lang_codes_display)
-                        task["lang_item"].setToolTip(new_lang_names_display)
+                        task["lang_item"].setText(new_lang_display)
+                        task["lang_item"].setToolTip(new_lang_tooltip)
                         task["languages"] = self.selected_languages.copy()
             
             self._save_settings()
@@ -2705,16 +2712,16 @@ class MainWindow(FramelessWidget):
             if not new_languages:
                 return
             
-            new_lang_codes_display = ", ".join(new_languages)
-            new_lang_names_display = self._format_language_tooltip(new_languages)
+            new_lang_display = self._get_language_display_text(new_languages)
+            new_lang_tooltip = self._format_language_tooltip(new_languages)
             
             for index in selected_indexes:
                 row = index.row()
                 if 0 <= row < len(self.tasks):
                     self.tasks[row]["languages"] = new_languages.copy()
                     
-                    self.tasks[row]["lang_item"].setText(new_lang_codes_display)
-                    self.tasks[row]["lang_item"].setToolTip(new_lang_names_display)
+                    self.tasks[row]["lang_item"].setText(new_lang_display)
+                    self.tasks[row]["lang_item"].setToolTip(new_lang_tooltip)
 
 if __name__ == "__main__":
     try:
