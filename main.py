@@ -2342,6 +2342,16 @@ class MainWindow(FramelessWidget):
 if __name__ == "__main__":
     try:
         app = QApplication(sys.argv)
+
+        def sigint_handler(*args):
+            app.quit()
+        
+        signal.signal(signal.SIGINT, sigint_handler)
+        
+        timer = QTimer()
+        timer.start(200) # ms
+        timer.timeout.connect(lambda: None)
+
         app.setStyleSheet(load_stylesheet())
         window = MainWindow()
         window.show()
