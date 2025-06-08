@@ -2728,6 +2728,7 @@ class MainWindow(FramelessWidget):
         
         self.clear_btn.setEnabled(has_any_tasks and not is_processing and not self.is_running)
         self.custom_title_bar.language_selection_btn.setEnabled(not is_processing and not self.is_running)
+        self.custom_title_bar.settings_btn.setEnabled(not is_processing and not self.is_running)
         
     def _get_language_names_from_codes(self, lang_codes):
         unique_codes = list(dict.fromkeys(lang_codes))
