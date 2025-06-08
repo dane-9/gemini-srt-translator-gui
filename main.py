@@ -2734,21 +2734,18 @@ class MainWindow(FramelessWidget):
                     )
 
 if __name__ == "__main__":
-    try:
-        app = QApplication(sys.argv)
+    app = QApplication(sys.argv)
 
-        def sigint_handler(*args):
-            return
+    def sigint_handler(*args):
+        return
         
-        signal.signal(signal.SIGINT, sigint_handler)
+    signal.signal(signal.SIGINT, sigint_handler)
         
-        timer = QTimer()
-        timer.start(200) # ms
-        timer.timeout.connect(lambda: None)
+    timer = QTimer()
+    timer.start(200) # ms
+    timer.timeout.connect(lambda: None)
 
-        app.setStyleSheet(load_stylesheet())
-        window = MainWindow()
-        window.show()
-        sys.exit(app.exec())
-    except KeyboardInterrupt:
-        sys.exit(0)
+    app.setStyleSheet(load_stylesheet())
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
