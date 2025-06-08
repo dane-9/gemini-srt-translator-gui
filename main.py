@@ -753,12 +753,18 @@ class SettingsDialog(CustomFramelessDialog):
         self.output_naming_pattern_edit = QLineEdit(self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt"))
         form_layout.addRow("Output Naming Pattern:", self.output_naming_pattern_edit)
         
-        self.update_queue_languages_checkbox = QCheckBox("Auto-update queue languages")
-        self.update_queue_languages_checkbox.setChecked(self.settings.get("update_existing_queue_languages", False))
-        self.update_queue_languages_checkbox.setToolTip("When enabled, changing the language selection will update all existing queue items that match the previous selection")
-        
         main_layout.addLayout(form_layout)
+        
+        self.auto_resume_checkbox = QCheckBox("Resume Stopped Translations")
+        self.auto_resume_checkbox.setChecked(self.settings.get("auto_resume", True))
+        self.auto_resume_checkbox.setToolTip("Resumes stopped translations from where they left off")
+        main_layout.addWidget(self.auto_resume_checkbox)
+        
+        self.update_queue_languages_checkbox = QCheckBox("Auto-Update Queue Languages")
+        self.update_queue_languages_checkbox.setChecked(self.settings.get("update_existing_queue_languages", True))
+        self.update_queue_languages_checkbox.setToolTip("When enabled, changing the language selection will update all existing queue items that match the previous selection")
         main_layout.addWidget(self.update_queue_languages_checkbox)
+        
         main_layout.addStretch()
         return page
     
@@ -784,7 +790,6 @@ class SettingsDialog(CustomFramelessDialog):
         gst_layout.addRow("Batch Size:", self.batch_size_spin)
         
         checkbox_items = [
-            ("auto_resume", "Auto Resume:", True),
             ("free_quota", "Free Quota:", True),
             ("skip_upgrade", "Skip Upgrade:", False),
             ("progress_log", "Progress Log:", False),
@@ -888,13 +893,13 @@ class SettingsDialog(CustomFramelessDialog):
     
     def reset_defaults(self):
         self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
+        self.auto_resume_checkbox.setChecked(True)
         self.update_queue_languages_checkbox.setChecked(True)
         
         self.gst_checkbox.setChecked(False)
         self.batch_size_spin.setValue(30)
         
         gst_defaults = {
-            "auto_resume": True,
             "free_quota": True,
             "skip_upgrade": False,
             "progress_log": False,
@@ -925,6 +930,7 @@ class SettingsDialog(CustomFramelessDialog):
         s = self.settings.copy()
         
         s["output_file_naming_pattern"] = self.output_naming_pattern_edit.text().strip()
+        s["auto_resume"] = self.auto_resume_checkbox.isChecked()
         s["update_existing_queue_languages"] = self.update_queue_languages_checkbox.isChecked()
         
         s["use_gst_parameters"] = self.gst_checkbox.isChecked()
@@ -1113,16 +1119,11 @@ class TranslationWorker(QObject):
             cmd.extend(["-d", self.description])
         
         progress_line, progress_lang = self._detect_progress_file()
-        should_resume = (self.settings.get("auto_resume", True) and 
-                        progress_line is not None and 
-                        progress_lang == target_language and
-                        progress_line >= 5)
+        auto_resume_enabled = self.settings.get("auto_resume", True)
         
-        if should_resume:
+        if auto_resume_enabled and progress_line is not None and progress_lang == target_language and progress_line >= 5:
             cmd.append("--resume")
-        elif progress_line is not None and progress_line < 5:
-            self._cleanup_for_fresh_start(target_language)
-        elif progress_line is not None and progress_lang != target_language:
+        elif progress_line is not None:
             self._cleanup_for_fresh_start(target_language)
         
         if self.settings.get("use_gst_parameters", False):
@@ -1136,9 +1137,9 @@ class TranslationWorker(QObject):
                 cmd.append("--progress-log")
             if self.settings.get("thoughts_log", False):
                 cmd.append("--thoughts-log")
-
+    
         cmd.append("--no-colors")
-
+    
         if self.settings.get("use_model_tuning", False):
             cmd.extend(["--temperature", str(self.settings.get("temperature", 0.7))])
             cmd.extend(["--top-p", str(self.settings.get("top_p", 0.95))])
