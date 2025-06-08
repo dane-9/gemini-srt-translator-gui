@@ -1385,7 +1385,14 @@ class TranslationWorker(QObject):
                         state = progress_match.group(3)
                         
                         overall_progress = int((completed_count / total_languages) * 100 + (lang_percent / total_languages))
-                        status_text = f"{state}... {lang_name} ({details}) - {completed_count + 1}/{total_languages}"
+
+                        action_str = f"{details} | {state}..."
+                        
+                        if total_languages > 1:
+                            overall_progress_str = f"[{completed_count + 1}/{total_languages}]"
+                            status_text = f"{overall_progress_str} Translating {lang_name}: {action_str}"
+                        else:
+                            status_text = f"Translating {lang_name}: {action_str}"
                         
                         self.progress_update.emit(self.task_index, overall_progress, status_text)
                         continue
