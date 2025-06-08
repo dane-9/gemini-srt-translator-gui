@@ -1304,9 +1304,9 @@ class TranslationWorker(QObject):
                     self.status_message.emit(self.task_index, f"Resuming {lang_name} from line {progress_line}")
                 else:
                     if progress_line and progress_line < 5:
-                        self.status_message.emit(self.task_index, f"Cleaning up and starting fresh for {lang_name} (progress < 5 lines)")
+                        self.status_message.emit(self.task_index, f"Starting over for {lang_name}")
                     elif progress_line and progress_lang != next_lang:
-                        self.status_message.emit(self.task_index, f"Cleaning up and starting fresh for {lang_name} (different language)")
+                        self.status_message.emit(self.task_index, f"Starting over for {lang_name}")
                     else:
                         self.status_message.emit(self.task_index, f"Translating to {lang_name}...")
                 
@@ -1776,7 +1776,7 @@ class MainWindow(FramelessWidget):
         
         controls_layout.addStretch()
         
-        self.selected_languages = self.settings.get("selected_languages", ["sv"])
+        self.selected_languages = self.settings.get("selected_languages", ["en"])
         
         self.overall_progress_bar = QProgressBar()
         self.overall_progress_bar.setTextVisible(True)
