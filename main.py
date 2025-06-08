@@ -2342,12 +2342,16 @@ class MainWindow(FramelessWidget):
                         self.active_worker.cancel()
                     self.active_thread.terminate()
                     self.active_thread.wait()
-                self._cleanup_all_task_files()
+                
+                if not self.settings.get("auto_resume", True):
+                    self._cleanup_all_task_files()
+                
                 event.accept()
             else:
                 event.ignore()
         else:
-            self._cleanup_all_task_files()
+            if not self.settings.get("auto_resume", True):
+                self._cleanup_all_task_files()
             event.accept()
 
     def add_files_action(self):
