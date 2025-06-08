@@ -101,6 +101,7 @@ DEFAULT_SETTINGS = {
     "selected_languages": ["sv"],
     "model_name": "gemini-2.5-flash-preview-05-20",
     "output_file_naming_pattern": "{original_name}.{lang_code}.srt",
+    "update_existing_queue_languages": False,
     "use_gst_parameters": False,
     "use_model_tuning": False,
     "description": "", 
@@ -752,7 +753,12 @@ class SettingsDialog(CustomFramelessDialog):
         self.output_naming_pattern_edit = QLineEdit(self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt"))
         form_layout.addRow("Output Naming Pattern:", self.output_naming_pattern_edit)
         
+        self.update_queue_languages_checkbox = QCheckBox("Auto-update queue languages")
+        self.update_queue_languages_checkbox.setChecked(self.settings.get("update_existing_queue_languages", False))
+        self.update_queue_languages_checkbox.setToolTip("When enabled, changing the language selection will update all existing queue items that match the previous selection")
+        
         main_layout.addLayout(form_layout)
+        main_layout.addWidget(self.update_queue_languages_checkbox)
         main_layout.addStretch()
         return page
     
@@ -882,6 +888,7 @@ class SettingsDialog(CustomFramelessDialog):
     
     def reset_defaults(self):
         self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
+        self.update_queue_languages_checkbox.setChecked(True)
         
         self.gst_checkbox.setChecked(False)
         self.batch_size_spin.setValue(30)
@@ -918,6 +925,7 @@ class SettingsDialog(CustomFramelessDialog):
         s = self.settings.copy()
         
         s["output_file_naming_pattern"] = self.output_naming_pattern_edit.text().strip()
+        s["update_existing_queue_languages"] = self.update_queue_languages_checkbox.isChecked()
         
         s["use_gst_parameters"] = self.gst_checkbox.isChecked()
         s["batch_size"] = self.batch_size_spin.value()
@@ -1948,7 +1956,9 @@ class MainWindow(FramelessWidget):
             self.selected_languages = dialog.get_selected_languages()
             self.settings["selected_languages"] = self.selected_languages
             
-            if old_languages != self.selected_languages:
+            if (old_languages != self.selected_languages and 
+                self.settings.get("update_existing_queue_languages", True)):
+                
                 new_lang_codes_display = ", ".join(self.selected_languages)
                 new_lang_names_display = self._format_language_tooltip(self.selected_languages)
                 
