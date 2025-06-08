@@ -1600,86 +1600,27 @@ class CustomTitleBarWidget(QWidget):
         window_controls_widget = QWidget()
         window_controls_widget.setLayout(window_controls_layout)
         layout.addWidget(window_controls_widget)
-        
-        self.mouse_pressed = False
-        self.mouse_pos = None
-        self.was_maximized = False
-        self.restore_geometry = None
     
     def minimize_window(self):
         if self.parent_window:
-            self.parent_window.showMinimized()
+            self.parent_window.minimize()
     
     def toggle_maximize(self):
         if self.parent_window:
+            self.parent_window.toggleMaximize()
+            
             if self.parent_window.isMaximized():
-                self.parent_window.showNormal()
-                self.maximize_btn.normal_icon = self.maximize_normal_icon
-                self.maximize_btn.hover_icon = self.maximize_hover_icon
-                self.maximize_btn.setIcon(self.maximize_normal_icon)
-            else:
-                self.restore_geometry = self.parent_window.geometry()
-                self.parent_window.showMaximized()
                 self.maximize_btn.normal_icon = self.restore_normal_icon
                 self.maximize_btn.hover_icon = self.restore_hover_icon
                 self.maximize_btn.setIcon(self.restore_normal_icon)
+            else:
+                self.maximize_btn.normal_icon = self.maximize_normal_icon
+                self.maximize_btn.hover_icon = self.maximize_hover_icon
+                self.maximize_btn.setIcon(self.maximize_normal_icon)
     
     def close_window(self):
         if self.parent_window:
             self.parent_window.close()
-    
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.mouse_pressed = True
-            self.mouse_pos = event.globalPosition().toPoint()
-            
-            if self.parent_window:
-                self.was_maximized = self.parent_window.isMaximized()
-                
-                if self.was_maximized and not self.restore_geometry:
-                    screen = QApplication.primaryScreen().geometry()
-                    restore_width = int(screen.width() * 0.8)
-                    restore_height = int(screen.height() * 0.8)
-                    restore_x = (screen.width() - restore_width) // 2
-                    restore_y = (screen.height() - restore_height) // 2
-                    
-                    self.restore_geometry = QRect(restore_x, restore_y, restore_width, restore_height)
-    
-    def mouseMoveEvent(self, event):
-        if self.mouse_pressed and self.mouse_pos and self.parent_window:
-            current_pos = event.globalPosition().toPoint()
-            
-            if self.was_maximized:
-                if self.restore_geometry:
-                    self.parent_window.setGeometry(self.restore_geometry)
-                else:
-                    self.parent_window.showNormal()
-                
-                self.maximize_btn.normal_icon = self.maximize_normal_icon
-                self.maximize_btn.hover_icon = self.maximize_hover_icon
-                self.maximize_btn.setIcon(self.maximize_normal_icon)
-                
-                title_bar_width = self.width()
-                click_ratio = (self.mouse_pos.x() - self.parent_window.geometry().left()) / self.parent_window.width() if self.parent_window.width() > 0 else 0.5
-                
-                new_x = current_pos.x() - int(self.parent_window.width() * click_ratio)
-                new_y = current_pos.y() - 20
-                
-                self.parent_window.move(new_x, new_y)
-                
-                self.mouse_pos = current_pos
-                self.was_maximized = False
-                
-            else:
-                diff = current_pos - self.mouse_pos
-                self.parent_window.move(self.parent_window.pos() + diff)
-                self.mouse_pos = current_pos
-    
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.mouse_pressed = False
-            self.mouse_pos = None
-            self.was_maximized = False
     
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
