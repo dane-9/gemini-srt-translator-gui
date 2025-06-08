@@ -145,6 +145,167 @@ LANGUAGES = {
     "Yoruba": "yo", "Zulu": "zu"
 }
 
+class QueueStateManager:
+    def __init__(self, queue_file_path):
+        self.queue_file_path = queue_file_path
+        self.state = self._load_queue_state()
+    
+    def _load_queue_state(self):
+        try:
+            if os.path.exists(self.queue_file_path):
+                with open(self.queue_file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Error loading queue state: {e}")
+        
+        return {"queue_state": {}}
+    
+    def _save_queue_state(self):
+        try:
+            queue_dir = os.path.dirname(self.queue_file_path)
+            if not os.path.exists(queue_dir):
+                os.makedirs(queue_dir, exist_ok=True)
+            
+            with open(self.queue_file_path, 'w', encoding='utf-8') as f:
+                json.dump(self.state, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving queue state: {e}")
+    
+    def add_subtitle_to_queue(self, subtitle_path, languages, description, output_pattern):
+        if subtitle_path not in self.state["queue_state"]:
+            self.state["queue_state"][subtitle_path] = {
+                "languages": {},
+                "description": description,
+                "target_languages": languages.copy(),
+                "output_pattern": output_pattern
+            }
+        
+        subtitle_dir = os.path.dirname(subtitle_path)
+        subtitle_basename = os.path.basename(subtitle_path)
+        name_part, ext = os.path.splitext(subtitle_basename)
+        
+        for code in LANGUAGES.values():
+            if name_part.endswith(f".{code}"):
+                name_part = name_part[:-len(f".{code}")]
+                break
+        
+        for lang_code in languages:
+            if lang_code not in self.state["queue_state"][subtitle_path]["languages"]:
+                output_filename = output_pattern.format(original_name=name_part, lang_code=lang_code)
+                output_path = os.path.join(subtitle_dir, output_filename)
+                
+                self.state["queue_state"][subtitle_path]["languages"][lang_code] = {
+                    "status": "queued",
+                    "output_file": output_path
+                }
+        
+        self._save_queue_state()
+    
+    def remove_subtitle_from_queue(self, subtitle_path):
+        if subtitle_path in self.state["queue_state"]:
+            del self.state["queue_state"][subtitle_path]
+            self._save_queue_state()
+    
+    def get_current_language_in_progress(self, subtitle_path):
+        if subtitle_path not in self.state["queue_state"]:
+            return None
+        
+        languages = self.state["queue_state"][subtitle_path]["languages"]
+        for lang_code, lang_data in languages.items():
+            if lang_data["status"] == "in_progress":
+                return lang_code
+        
+        return None
+    
+    def get_next_language_to_process(self, subtitle_path):
+        if subtitle_path not in self.state["queue_state"]:
+            return None
+        
+        languages = self.state["queue_state"][subtitle_path]["languages"]
+        target_languages = self.state["queue_state"][subtitle_path]["target_languages"]
+        
+        for lang_code in target_languages:
+            if lang_code in languages and languages[lang_code]["status"] == "in_progress":
+                return lang_code
+        
+        for lang_code in target_languages:
+            if lang_code in languages and languages[lang_code]["status"] == "queued":
+                return lang_code
+        
+        return None
+    
+    def mark_language_in_progress(self, subtitle_path, lang_code):
+        if subtitle_path in self.state["queue_state"]:
+            if lang_code in self.state["queue_state"][subtitle_path]["languages"]:
+                self.state["queue_state"][subtitle_path]["languages"][lang_code]["status"] = "in_progress"
+                self._save_queue_state()
+    
+    def mark_language_completed(self, subtitle_path, lang_code):
+        if subtitle_path in self.state["queue_state"]:
+            if lang_code in self.state["queue_state"][subtitle_path]["languages"]:
+                self.state["queue_state"][subtitle_path]["languages"][lang_code]["status"] = "completed"
+                self._save_queue_state()
+    
+    def mark_language_queued(self, subtitle_path, lang_code):
+        if subtitle_path in self.state["queue_state"]:
+            if lang_code in self.state["queue_state"][subtitle_path]["languages"]:
+                self.state["queue_state"][subtitle_path]["languages"][lang_code]["status"] = "queued"
+                self._save_queue_state()
+    
+    def get_language_progress_summary(self, subtitle_path):
+        if subtitle_path not in self.state["queue_state"]:
+            return "Queued"
+        
+        languages = self.state["queue_state"][subtitle_path]["languages"]
+        total_languages = len(languages)
+        completed_count = sum(1 for lang_data in languages.values() if lang_data["status"] == "completed")
+        
+        if completed_count == 0:
+            return "Queued"
+        elif completed_count == total_languages:
+            return "Translated"
+        else:
+            return f"{completed_count}/{total_languages} Languages completed"
+    
+    def has_any_work_remaining(self):
+        for subtitle_path, subtitle_data in self.state["queue_state"].items():
+            languages = subtitle_data["languages"]
+            for lang_data in languages.values():
+                if lang_data["status"] in ["queued", "in_progress"]:
+                    return True
+        return False
+    
+    def get_next_subtitle_with_work(self):
+        for subtitle_path, subtitle_data in self.state["queue_state"].items():
+            next_lang = self.get_next_language_to_process(subtitle_path)
+            if next_lang:
+                return subtitle_path
+        return None
+    
+    def cleanup_completed_subtitle(self, subtitle_path):
+        if subtitle_path in self.state["queue_state"]:
+            languages = self.state["queue_state"][subtitle_path]["languages"]
+            all_completed = all(lang_data["status"] == "completed" for lang_data in languages.values())
+            
+            if all_completed:
+                progress_file = self._get_progress_file_path(subtitle_path)
+                if os.path.exists(progress_file):
+                    try:
+                        os.remove(progress_file)
+                    except Exception:
+                        pass
+    
+    def _get_progress_file_path(self, subtitle_path):
+        original_basename = os.path.basename(subtitle_path)
+        name_part, ext = os.path.splitext(original_basename)
+        progress_filename = f"{name_part}.progress"
+        original_dir = os.path.dirname(subtitle_path)
+        return os.path.join(original_dir, progress_filename)
+    
+    def clear_all_state(self):
+        self.state = {"queue_state": {}}
+        self._save_queue_state()
+
 class DialogTitleBarWidget(QWidget):
     def __init__(self, title="Dialog", parent=None):
         super().__init__(parent)
@@ -858,7 +1019,7 @@ class TranslationWorker(QObject):
     status_message = Signal(int, str)
     language_completed = Signal(int, str, bool)
     
-    def __init__(self, task_index, input_file_path, target_languages, api_key, api_key2, model_name, settings, description=""):
+    def __init__(self, task_index, input_file_path, target_languages, api_key, api_key2, model_name, settings, description="", queue_manager=None):
         super().__init__()
         self.task_index = task_index
         self.input_file_path = input_file_path
@@ -868,12 +1029,11 @@ class TranslationWorker(QObject):
         self.model_name = model_name
         self.settings = settings
         self.description = description
+        self.queue_manager = queue_manager
         self.is_cancelled = False
-        self.current_language_index = 0
-        self.completed_languages = []
-        self.failed_languages = []
+        self.current_language = None
         self.process = None
-        
+    
     def _generate_output_filename(self, lang_code):
         original_basename = os.path.basename(self.input_file_path)
         name_part, ext = os.path.splitext(original_basename)
@@ -901,10 +1061,31 @@ class TranslationWorker(QObject):
             try:
                 with open(progress_file, 'r', encoding='utf-8') as f:
                     progress_data = json.load(f)
-                    return progress_data.get("line", None)
-            except Exception:
-                return None
-        return None
+                    progress_line = progress_data.get("line", None)
+                    
+                    if self.queue_manager:
+                        current_lang = self.queue_manager.get_current_language_in_progress(self.input_file_path)
+                        if current_lang:
+                            return progress_line, current_lang
+                    
+                    return progress_line, None
+            except Exception as e:
+                print(f"Error reading progress file {progress_file}: {e}")
+                return None, None
+        return None, None
+        
+    def _cleanup_for_fresh_start(self, target_language):
+        try:
+            progress_file = self._get_progress_file_path()
+            if os.path.exists(progress_file):
+                os.remove(progress_file)
+            
+            output_file = self._generate_output_filename(target_language)
+            if os.path.exists(output_file):
+                os.remove(output_file)
+                
+        except Exception as e:
+            print(f"Error cleaning up files for fresh start: {e}")
     
     def _build_cli_command(self, target_language):
         cmd = ["gst", "translate"]
@@ -923,11 +1104,18 @@ class TranslationWorker(QObject):
         if self.description:
             cmd.extend(["-d", self.description])
         
-        progress_line = self._detect_progress_file()
-        should_resume = self.settings.get("auto_resume", True) and progress_line is not None
+        progress_line, progress_lang = self._detect_progress_file()
+        should_resume = (self.settings.get("auto_resume", True) and 
+                        progress_line is not None and 
+                        progress_lang == target_language and
+                        progress_line >= 5)
         
         if should_resume:
             cmd.append("--resume")
+        elif progress_line is not None and progress_line < 5:
+            self._cleanup_for_fresh_start(target_language)
+        elif progress_line is not None and progress_lang != target_language:
+            self._cleanup_for_fresh_start(target_language)
         
         if self.settings.get("use_gst_parameters", False):
             cmd.extend(["-b", str(self.settings.get("batch_size", 30))])
@@ -979,7 +1167,8 @@ class TranslationWorker(QObject):
                         self.process.send_signal(signal.SIGINT)
                     except:
                         self.process.send_signal(signal.SIGTERM)
-            except Exception:
+            except Exception as e:
+                print(f"Error sending interrupt signal: {e}")
                 self.process.terminate()
     
     @Slot()
@@ -988,25 +1177,41 @@ class TranslationWorker(QObject):
             self.finished.emit(self.task_index, "Cancelled before start", False)
             return
 
+        if not self.queue_manager:
+            self.finished.emit(self.task_index, "Queue manager not available", False)
+            return
+
+        completed_count = 0
         total_languages = len(self.target_languages)
         
-        for lang_index, target_lang in enumerate(self.target_languages):
+        while True:
             if self.is_cancelled:
                 break
-                
-            self.current_language_index = lang_index
-            lang_name = self._get_language_name(target_lang)
+            
+            next_lang = self.queue_manager.get_next_language_to_process(self.input_file_path)
+            if not next_lang:
+                break
+            
+            self.current_language = next_lang
+            lang_name = self._get_language_name(next_lang)
             
             try:
-                overall_progress = int((lang_index / total_languages) * 100)
+                self.queue_manager.mark_language_in_progress(self.input_file_path, next_lang)
                 
-                progress_line = self._detect_progress_file()
-                if progress_line and self.settings.get("auto_resume", True):
-                    self.status_message.emit(self.task_index, f"Will resume from line {progress_line}")
+                progress_line, progress_lang = self._detect_progress_file()
+                if (progress_line and progress_lang == next_lang and 
+                    self.settings.get("auto_resume", True) and progress_line >= 5):
+                    self.status_message.emit(self.task_index, f"Resuming {lang_name} from line {progress_line}")
                 else:
-                    self.status_message.emit(self.task_index, f"Translating to {lang_name}...")
+                    if progress_line and progress_line < 5:
+                        self.status_message.emit(self.task_index, f"Cleaning up and starting fresh for {lang_name} (progress < 5 lines)")
+                    elif progress_line and progress_lang != next_lang:
+                        self.status_message.emit(self.task_index, f"Cleaning up and starting fresh for {lang_name} (different language)")
+                    else:
+                        self.status_message.emit(self.task_index, f"Translating to {lang_name}...")
                 
-                cmd = self._build_cli_command(target_lang)
+                cmd = self._build_cli_command(next_lang)
+                
                 env = os.environ.copy()
                 env["PYTHONIOENCODING"] = "utf-8"
                 env["PYTHONUNBUFFERED"] = "1"
@@ -1022,8 +1227,10 @@ class TranslationWorker(QObject):
                 )
 
                 found_completion = False
+                line_count = 0
 
                 for line in iter(self.process.stdout.readline, ''):
+                    line_count += 1
                     if self.is_cancelled:
                         self._send_interrupt_signal()
                         
@@ -1067,7 +1274,7 @@ class TranslationWorker(QObject):
                         resume_match = re.search(r"Resuming from line (\d+)", line)
                         if resume_match:
                             resume_line = resume_match.group(1)
-                            self.status_message.emit(self.task_index, f"Resuming from line {resume_line}")
+                            self.status_message.emit(self.task_index, f"Resuming {lang_name} from line {resume_line}")
                         continue
 
                     progress_match = re.search(r"Translating:\s*\|.*\|\s*(\d+)%\s*\(([^)]+)\)[^|]*\|\s*(Thinking|Processing)", line)
@@ -1077,58 +1284,60 @@ class TranslationWorker(QObject):
                         details = progress_match.group(2)
                         state = progress_match.group(3)
                         
-                        total_percent = overall_progress + int((lang_percent / 100) * (100 / total_languages))
-                        status_text = f"{state}... {lang_name} ({details}) - {lang_index + 1}/{total_languages}"
+                        overall_progress = int((completed_count / total_languages) * 100 + (lang_percent / total_languages))
+                        status_text = f"{state}... {lang_name} ({details}) - {completed_count + 1}/{total_languages}"
                         
-                        self.progress_update.emit(self.task_index, total_percent, status_text)
+                        self.progress_update.emit(self.task_index, overall_progress, status_text)
                         continue
 
                     elif "Translation completed successfully!" in line:
                         found_completion = True
                         break
 
+                if self.process.stderr:
+                    try:
+                        stderr_output = self.process.stderr.read()
+                        if stderr_output:
+                            print(f"GST stderr output: {stderr_output}")
+                    except:
+                        pass
+
                 return_code = self.process.wait()
                 self.process = None
 
                 if self.is_cancelled:
-                    self.finished.emit(self.task_index, "Translation cancelled", False)
+                    summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
+                    self.finished.emit(self.task_index, summary, False)
                     return
 
                 if return_code == 0 and found_completion:
-                    self.completed_languages.append(target_lang)
-                    self.language_completed.emit(self.task_index, target_lang, True)
+                    self.queue_manager.mark_language_completed(self.input_file_path, next_lang)
+                    completed_count += 1
+                    self.language_completed.emit(self.task_index, next_lang, True)
                 else:
-                    self.failed_languages.append(target_lang)
-                    self.language_completed.emit(self.task_index, target_lang, False)
+                    self.queue_manager.mark_language_queued(self.input_file_path, next_lang)
+                    self.language_completed.emit(self.task_index, next_lang, False)
 
             except Exception as e:
+                print(f"Exception during translation of {next_lang}: {e}")
                 if self.is_cancelled:
-                    self.finished.emit(self.task_index, "Translation cancelled", False)
+                    summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
+                    self.finished.emit(self.task_index, summary, False)
                     return
                 else:
-                    self.failed_languages.append(target_lang)
-                    self.language_completed.emit(self.task_index, target_lang, False)
+                    self.queue_manager.mark_language_queued(self.input_file_path, next_lang)
+                    self.language_completed.emit(self.task_index, next_lang, False)
 
         if self.is_cancelled:
-            self.finished.emit(self.task_index, "Translation cancelled", False)
-        elif len(self.completed_languages) == total_languages:
-            self._cleanup_progress_file()
-            self.finished.emit(self.task_index, "Translated", True)
-        elif len(self.completed_languages) > 0:
-            completed_str = ", ".join(self.completed_languages)
-            failed_str = ", ".join(self.failed_languages)
-            msg = f"Partial success: {completed_str} completed, {failed_str} failed"
-            self.finished.emit(self.task_index, msg, False)
+            summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
+            self.finished.emit(self.task_index, summary, False)
         else:
-            self.finished.emit(self.task_index, "Translations failed", False)
-    
-    def _cleanup_progress_file(self):
-        progress_file = self._get_progress_file_path()
-        if os.path.exists(progress_file):
-            try:
-                os.remove(progress_file)
-            except Exception:
-                pass
+            final_summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
+            if final_summary == "Translated":
+                self.queue_manager.cleanup_completed_subtitle(self.input_file_path)
+                self.finished.emit(self.task_index, "Translated", True)
+            else:
+                self.finished.emit(self.task_index, final_summary, False)
     
     def cancel(self):
         self.is_cancelled = True
@@ -1541,7 +1750,63 @@ class MainWindow(FramelessWidget):
         
         main_layout.addWidget(content_widget)
         
+        queue_state_file = get_resource_path("queue_state.json")
+        self.queue_manager = QueueStateManager(queue_state_file)
+        
+        self._sync_ui_with_queue_state()
+        
         self.update_button_states()
+        
+    def _sync_ui_with_queue_state(self):
+        queue_state = self.queue_manager.state.get("queue_state", {})
+        
+        for subtitle_path, subtitle_data in queue_state.items():
+            if os.path.exists(subtitle_path):
+                target_languages = subtitle_data.get("target_languages", [])
+                description = subtitle_data.get("description", "")
+                
+                task_exists = any(task['path'] == subtitle_path and task['languages'] == target_languages for task in self.tasks)
+                
+                if not task_exists:
+                    self._add_task_to_ui(subtitle_path, target_languages, description)
+                    
+                    for task in self.tasks:
+                        if task['path'] == subtitle_path:
+                            summary = self.queue_manager.get_language_progress_summary(subtitle_path)
+                            task["status_item"].setText(summary)
+                            break
+    
+    def _add_task_to_ui(self, file_path, languages, description):
+        lang_codes_display = ", ".join(languages)
+        lang_names_display = self._format_language_tooltip(languages)
+        
+        path_item = QStandardItem(os.path.basename(file_path))
+        path_item.setToolTip(os.path.dirname(file_path))
+        path_item.setEditable(False)
+        
+        lang_item = QStandardItem(lang_codes_display)
+        lang_item.setToolTip(lang_names_display)
+        lang_item.setEditable(False)
+        
+        desc_item = QStandardItem(description)
+        desc_item.setEditable(True)
+        desc_item.setToolTip(description)
+        
+        status_item = QStandardItem("Queued")
+        status_item.setEditable(False)
+        
+        self.model.appendRow([path_item, lang_item, desc_item, status_item])
+        self.tasks.append({
+            "path": file_path, 
+            "path_item": path_item, 
+            "lang_item": lang_item,
+            "desc_item": desc_item, 
+            "status_item": status_item, 
+            "description": description,
+            "languages": languages.copy(),
+            "worker": None, 
+            "thread": None
+        })
 
     def toggle_start_stop(self):
         if self.is_running:
@@ -1995,7 +2260,11 @@ class MainWindow(FramelessWidget):
         for row in rows_to_remove:
             if 0 <= row < len(self.tasks):
                 task = self.tasks[row]
+                
+                self.queue_manager.remove_subtitle_from_queue(task["path"])
+                
                 self._cleanup_task_files(task)
+                
                 self.tasks.pop(row)
                 self.model.removeRow(row)
         
@@ -2073,40 +2342,18 @@ class MainWindow(FramelessWidget):
     def add_files_action(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Subtitle Files", "", "SRT Files (*.srt);;All Files (*)")
         if files:
-            lang_codes_display = ", ".join(self.selected_languages)
-            lang_names_display = self._format_language_tooltip(self.selected_languages)
-            
             for file_path in files:
                 if any(task['path'] == file_path and task['languages'] == self.selected_languages for task in self.tasks):
                     continue
-                    
-                path_item = QStandardItem(os.path.basename(file_path))
-                path_item.setToolTip(os.path.dirname(file_path))
-                path_item.setEditable(False)
                 
-                lang_item = QStandardItem(lang_codes_display)
-                lang_item.setToolTip(lang_names_display)
-                lang_item.setEditable(False)
+                self.queue_manager.add_subtitle_to_queue(
+                    file_path, 
+                    self.selected_languages.copy(), 
+                    "", 
+                    self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+                )
                 
-                desc_item = QStandardItem("")
-                desc_item.setEditable(True)
-                desc_item.setToolTip("")
-                
-                status_item = QStandardItem("Queued")
-                status_item.setEditable(False)
-                
-                self.model.appendRow([path_item, lang_item, desc_item, status_item])
-                self.tasks.append({
-                    "path": file_path, 
-                    "path_item": path_item, 
-                    "lang_item": lang_item,
-                    "desc_item": desc_item, 
-                    "status_item": status_item, 
-                    "description": "",
-                    "languages": self.selected_languages.copy(),
-                    "worker": None, 
-                    "thread": None
-                })
+                self._add_task_to_ui(file_path, self.selected_languages.copy(), "")
                 
             self.update_button_states()
 
@@ -2119,18 +2366,23 @@ class MainWindow(FramelessWidget):
         if self.active_thread and self.active_thread.isRunning():
             CustomMessageBox.information(self, "In Progress", "A translation is already in progress.")
             return
-            
-        first_queued_idx = -1
+        
+        if not self.queue_manager.has_any_work_remaining():
+            CustomMessageBox.information(self, "Queue Status", "No work remaining in queue.")
+            return
+        
+        first_task_with_work = -1
         for i, task_data in enumerate(self.tasks):
-            if task_data["status_item"].text() == "Queued":
-                first_queued_idx = i
+            next_lang = self.queue_manager.get_next_language_to_process(task_data["path"])
+            if next_lang:
+                first_task_with_work = i
                 break
                 
-        if first_queued_idx == -1:
-            CustomMessageBox.information(self, "Queue Status", "No subtitles in 'Queued' state.")
+        if first_task_with_work == -1:
+            CustomMessageBox.information(self, "Queue Status", "No work remaining in queue.")
             return
             
-        self.current_task_index = first_queued_idx
+        self.current_task_index = first_task_with_work
         self._process_task_at_index(self.current_task_index)
         self.update_button_states()
 
@@ -2140,7 +2392,9 @@ class MainWindow(FramelessWidget):
             return
             
         task = self.tasks[task_idx]
-        if task["status_item"].text() != "Queued":
+        
+        next_lang = self.queue_manager.get_next_language_to_process(task["path"])
+        if not next_lang:
             self._find_and_process_next_queued_task()
             return
             
@@ -2159,7 +2413,8 @@ class MainWindow(FramelessWidget):
             api_key2=self.api_key2_edit.text().strip(),
             model_name=self.model_name_edit.text().strip(), 
             settings=self.settings,
-            description=task["description"]
+            description=task["description"],
+            queue_manager=self.queue_manager
         )
         self.active_thread = QThread(self)
         self.active_worker.moveToThread(self.active_thread)
@@ -2174,16 +2429,13 @@ class MainWindow(FramelessWidget):
         self.update_button_states()
 
     def _find_and_process_next_queued_task(self):
-        next_idx = -1
-        for i in range(len(self.tasks)):
-            if self.tasks[i]["status_item"].text() == "Queued":
-                next_idx = i
-                break
-                
-        if next_idx != -1:
-            self._process_task_at_index(next_idx)
-        else:
-            self._handle_queue_finished()
+        for i, task in enumerate(self.tasks):
+            next_lang = self.queue_manager.get_next_language_to_process(task["path"])
+            if next_lang:
+                self._process_task_at_index(i)
+                return
+        
+        self._handle_queue_finished()
 
     def _handle_queue_finished(self):
         self.overall_progress_bar.setVisible(False)
@@ -2216,39 +2468,39 @@ class MainWindow(FramelessWidget):
             
         self.active_worker = None
         self.active_thread = None
-        self.overall_progress_bar.setFormat("Error" if not success else "Completed")
         
-        if not success:
+        if not success and "cancelled" in message.lower():
+            self.overall_progress_bar.setFormat("Stopped")
+            self.overall_progress_bar.setValue(0)
+        elif not success:
+            self.overall_progress_bar.setFormat("Error") 
             self.overall_progress_bar.setValue(0)
         else:
             self.overall_progress_bar.setValue(100)
+            self.overall_progress_bar.setFormat("Completed")
+        
+        if success and self.is_running:
+            QTimer.singleShot(500, self._find_and_process_next_queued_task)
+        else:
+            QTimer.singleShot(500, self._handle_queue_finished)
             
-        QTimer.singleShot(500, self._find_and_process_next_queued_task)
         self.update_button_states()
 
     @Slot()
     def stop_translation_action(self, force_quit=False):
         if self.active_worker:
-            self.active_worker.cancel()
-            if 0 <= self.current_task_index < len(self.tasks):
-                 self.tasks[self.current_task_index]["status_item"].setText("Cancelling...")
-        elif not force_quit:
-            stopped_any_queued = False
-            for i in range(len(self.tasks)):
-                if self.tasks[i]["status_item"].text() == "Queued":
-                    self.tasks[i]["status_item"].setText("Cancelled (Queue Stopped)")
-                    stopped_any_queued = True
-            if not stopped_any_queued:
-                CustomMessageBox.information(self, "Stop", "No active translation to stop.")
+            current_task_idx = self.current_task_index
+            if 0 <= current_task_idx < len(self.tasks):
+                current_task_path = self.tasks[current_task_idx]["path"]
+                current_lang = self.queue_manager.get_current_language_in_progress(current_task_path)
                 
-        if not force_quit:
-            stopped_any_queued = False
-            for i in range(len(self.tasks)):
-                if self.tasks[i]["status_item"].text() == "Queued":
-                    self.tasks[i]["status_item"].setText("Cancelled (Queue Stopped)")
-                    stopped_any_queued = True
-            if not self.active_worker:
-                self._find_and_process_next_queued_task()
+                self.active_worker.cancel()
+                self.tasks[current_task_idx]["status_item"].setText("Cancelling...")
+                
+                if current_lang:
+                    self.queue_manager.mark_language_queued(current_task_path, current_lang)
+        elif not force_quit:
+            CustomMessageBox.information(self, "Stop", "No active translation to stop.")
         
         self.is_running = False
         self.update_button_states()
@@ -2261,6 +2513,9 @@ class MainWindow(FramelessWidget):
         reply = CustomMessageBox.question(self, "Clear Queue", "Remove all items from queue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
             self._cleanup_all_task_files()
+            
+            self.queue_manager.clear_all_state()
+            
             self.tasks.clear()
             self.model.removeRows(0, self.model.rowCount())
             self.current_task_index = -1
@@ -2278,7 +2533,7 @@ class MainWindow(FramelessWidget):
             self._save_settings()
 
     def update_button_states(self):
-        has_queued_tasks = any(task["status_item"].text() == "Queued" for task in self.tasks)
+        has_work_remaining = self.queue_manager.has_any_work_remaining()
         is_processing = self.active_thread is not None and self.active_thread.isRunning()
         has_any_tasks = len(self.tasks) > 0
         api_key_valid = len(self.api_key_edit.text().strip()) >= 12
@@ -2292,8 +2547,7 @@ class MainWindow(FramelessWidget):
                 self.start_stop_btn.setEnabled(False)
             else:
                 self.start_stop_btn.setText("Start Translating")
-                start_enabled = has_queued_tasks
-                self.start_stop_btn.setEnabled(start_enabled)
+                self.start_stop_btn.setEnabled(has_work_remaining)
         
         self.clear_btn.setEnabled(has_any_tasks and not is_processing and not self.is_running)
         
@@ -2344,7 +2598,7 @@ if __name__ == "__main__":
         app = QApplication(sys.argv)
 
         def sigint_handler(*args):
-            app.quit()
+            return
         
         signal.signal(signal.SIGINT, sigint_handler)
         
