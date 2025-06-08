@@ -2703,6 +2703,22 @@ class MainWindow(FramelessWidget):
             row = selected_indexes[0].row()
             if 0 <= row < len(self.tasks):
                 current_languages = self.tasks[row]["languages"].copy()
+        elif len(selected_indexes) > 1:
+            first_languages = None
+            all_same = True
+            
+            for index in selected_indexes:
+                row = index.row()
+                if 0 <= row < len(self.tasks):
+                    task_languages = self.tasks[row]["languages"]
+                    if first_languages is None:
+                        first_languages = task_languages.copy()
+                    elif set(task_languages) != set(first_languages):
+                        all_same = False
+                        break
+            
+            if all_same and first_languages:
+                current_languages = first_languages
         
         dialog = LanguageSelectionDialog(current_languages, self)
         dialog.set_title("Edit Output Languages")
