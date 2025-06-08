@@ -881,12 +881,6 @@ class SettingsDialog(CustomFramelessDialog):
         self.top_k_spin.setMaximumWidth(150)
         form_layout.addRow("Top K:", self.top_k_spin)
         
-        self.thinking_budget_spin = QSpinBox()
-        self.thinking_budget_spin.setRange(0, 24576)
-        self.thinking_budget_spin.setValue(self.settings.get("thinking_budget", 2048))
-        self.thinking_budget_spin.setMaximumWidth(150)
-        form_layout.addRow("Thinking Budget:", self.thinking_budget_spin)
-        
         model_layout.addLayout(form_layout)
         
         model_checkbox_items = [
@@ -901,12 +895,34 @@ class SettingsDialog(CustomFramelessDialog):
             self.model_checkboxes[setting_key] = checkbox
             model_layout.addWidget(checkbox)
         
+        self.model_checkboxes["thinking"].stateChanged.connect(self.toggle_thinking_budget)
+        
+        self.thinking_budget_widget = QWidget()
+        budget_layout = QFormLayout(self.thinking_budget_widget)
+        budget_layout.setContentsMargins(20, 0, 0, 0)
+        
+        self.thinking_budget_spin = QSpinBox()
+        self.thinking_budget_spin.setRange(0, 24576)
+        self.thinking_budget_spin.setValue(self.settings.get("thinking_budget", 2048))
+        self.thinking_budget_spin.setMaximumWidth(150)
+        budget_layout.addRow("Budget:", self.thinking_budget_spin)
+        
+        model_layout.addWidget(self.thinking_budget_widget)
+        
         layout.addWidget(self.model_content_widget)
         layout.addStretch()
         
         self.toggle_model_settings(self.model_checkbox.isChecked())
+        self.toggle_thinking_budget(self.model_checkboxes["thinking"].isChecked())
         
         return page
+        
+    def toggle_thinking_budget(self, enabled):
+        self.thinking_budget_widget.setEnabled(enabled)
+        if not enabled:
+            self.thinking_budget_widget.setStyleSheet("color: grey;")
+        else:
+            self.thinking_budget_widget.setStyleSheet("")
     
     def on_category_changed(self, current, previous):
         if current.isValid():
@@ -926,6 +942,8 @@ class SettingsDialog(CustomFramelessDialog):
             self.model_content_widget.setStyleSheet("color: grey;")
         else:
             self.model_content_widget.setStyleSheet("")
+            if hasattr(self, 'model_checkboxes') and 'thinking' in self.model_checkboxes:
+                self.toggle_thinking_budget(self.model_checkboxes["thinking"].isChecked())
     
     def reset_defaults(self):
         self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
