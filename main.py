@@ -381,11 +381,6 @@ class DialogTitleBarWidget(QWidget):
         if self.parent_window:
             self.parent_window.close()
     
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.mouse_pressed = True
-            self.mouse_pos = event.globalPosition().toPoint()
-    
     def mouseMoveEvent(self, event):
         if self.mouse_pressed and self.mouse_pos and self.parent_window:
             diff = event.globalPosition().toPoint() - self.mouse_pos
