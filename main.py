@@ -1236,7 +1236,7 @@ class SettingsDialog(CustomFramelessDialog):
         self.queue_on_exit_combo.setCurrentIndex(1)
         self.existing_file_combo.setCurrentIndex(0)
         self.auto_resume_checkbox.setChecked(True)
-        self.update_queue_languages_checkbox.setChecked(True)
+        self.update_queue_languages_checkbox.setChecked(False)
         
         self.gst_checkbox.setChecked(False)
         self.batch_size_spin.setValue(30)
