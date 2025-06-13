@@ -12,10 +12,11 @@ from PySide6.QtWidgets import (
     QPushButton, QTreeView, QLineEdit, QLabel, QFileDialog, QMessageBox,
     QComboBox, QProgressBar, QDialog, QFormLayout,
     QSpinBox, QDoubleSpinBox, QCheckBox, QDialogButtonBox, QMenu, QTextEdit,
-    QToolButton, QFrame, QStackedWidget, QStyle, QListWidget, QListWidgetItem
+    QToolButton, QFrame, QStackedWidget, QStyle, QListWidget, QListWidgetItem,
+    QStyledItemDelegate
 )
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap, QPainter, QLinearGradient, QColor, QPen, QFontMetrics
-from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QTimer, QItemSelectionModel, QRect
+from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QTimer, QItemSelectionModel, QRect, QModelIndex
 from window import FramelessWidget
 
 def is_compiled():
@@ -35,7 +36,7 @@ def get_resource_path(relative_path):
     full_path = os.path.join(base_path, relative_path)
     return full_path
 
-def load_colored_svg(svg_path, color="#A0A0A0"):
+def load_svg(svg_path, color="#A0A0A0", size=None):
     try:
         with open(svg_path, 'r', encoding='utf-8') as f:
             svg_content = f.read()
@@ -46,6 +47,18 @@ def load_colored_svg(svg_path, color="#A0A0A0"):
         svg_bytes = svg_content.encode('utf-8')
         pixmap = QPixmap()
         pixmap.loadFromData(svg_bytes, 'SVG')
+        
+        if size is not None:
+            device_ratio = 2.0
+            high_res_size = int(size * device_ratio)
+            
+            high_res_pixmap = pixmap.scaled(
+                high_res_size, high_res_size, 
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            
+            high_res_pixmap.setDevicePixelRatio(device_ratio)
+            pixmap = high_res_pixmap
 
         return QIcon(pixmap)
 
@@ -159,6 +172,89 @@ LANGUAGES = {
     "Uzbek": "uz", "Vietnamese": "vi", "Xhosa": "xh", "Yiddish": "yi",
     "Yoruba": "yo", "Zulu": "zu"
 }
+
+class IconTextDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.icon_configs = {}
+    
+    def add_icon_config(self, column, text_pattern, icon_path, color="#A0A0A0", size=16, position="after", spacing=2, exact_match=True):
+        if column not in self.icon_configs:
+            self.icon_configs[column] = []
+        
+        config = {
+            'text_pattern': text_pattern,
+            'icon': load_svg(icon_path, color, size),
+            'size': size,
+            'position': position,
+            'spacing': spacing,
+            'exact_match': exact_match
+        }
+        self.icon_configs[column].append(config)
+    
+    def paint(self, painter, option, index):
+        column = index.column()
+        text = str(index.data()) if index.data() else ""
+        
+        config = self._get_matching_config(column, text)
+        
+        if config and config['icon'] and not config['icon'].isNull():
+            self._paint_with_icon(painter, option, index, text, config)
+        else:
+            super().paint(painter, option, index)
+    
+    def _get_matching_config(self, column, text):
+        if column not in self.icon_configs:
+            return None
+        
+        for config in self.icon_configs[column]:
+            if config['exact_match']:
+                if config['text_pattern'] == text:
+                    return config
+            else:
+                if config['text_pattern'] in text:
+                    return config
+        
+        return None
+    
+    def _paint_with_icon(self, painter, option, index, text, config):
+        super().paint(painter, option, index)
+        
+        fm = painter.fontMetrics()
+        text_width = fm.horizontalAdvance(text)
+        icon_size = config['size']
+        spacing = config['spacing']
+        
+        margin_left = 4
+        start_x = option.rect.left() + margin_left
+        
+        if config['position'] == "before":
+            icon_x = start_x
+            text_x = start_x + icon_size + spacing
+            
+            text_clear_rect = QRect(text_x, option.rect.top(), text_width, option.rect.height())
+            if option.state & QStyle.State_Selected:
+                painter.fillRect(text_clear_rect, option.palette.highlight())
+            elif index.row() % 2:
+                painter.fillRect(text_clear_rect, option.palette.alternateBase())
+            else:
+                painter.fillRect(text_clear_rect, option.palette.base())
+        else:
+            text_x = start_x
+            icon_x = start_x + text_width + spacing
+        
+        if config['position'] == "before":
+            if option.state & QStyle.State_Selected:
+                painter.setPen(option.palette.highlightedText().color())
+            else:
+                painter.setPen(option.palette.text().color())
+            
+            text_rect = QRect(text_x, option.rect.top(), text_width, option.rect.height())
+            painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, text)
+        
+        icon_y = option.rect.top() + (option.rect.height() - icon_size) // 2
+        icon_rect = QRect(icon_x, icon_y, icon_size, icon_size)
+        config['icon'].paint(painter, icon_rect)
 
 class QueueStateManager:
     def __init__(self, queue_file_path):
@@ -561,9 +657,9 @@ class HoverToolButton(QToolButton):
         self.hover_color = hover_color
         self.disabled_color = disabled_color
         
-        self.normal_icon = load_colored_svg(svg_path, normal_color)
-        self.hover_icon = load_colored_svg(svg_path, hover_color)
-        self.disabled_icon = load_colored_svg(svg_path, disabled_color)
+        self.normal_icon = load_svg(svg_path, normal_color)
+        self.hover_icon = load_svg(svg_path, hover_color)
+        self.disabled_icon = load_svg(svg_path, disabled_color)
         
         self.setIcon(self.normal_icon)
         
@@ -592,9 +688,9 @@ class HoverPushButton(QPushButton):
         self.hover_color = hover_color
         self.disabled_color = disabled_color
         
-        self.normal_icon = load_colored_svg(svg_path, normal_color)
-        self.hover_icon = load_colored_svg(svg_path, hover_color)
-        self.disabled_icon = load_colored_svg(svg_path, disabled_color)
+        self.normal_icon = load_svg(svg_path, normal_color)
+        self.hover_icon = load_svg(svg_path, hover_color)
+        self.disabled_icon = load_svg(svg_path, disabled_color)
         
         self.setIcon(self.normal_icon)
         
@@ -850,15 +946,15 @@ class SettingsDialog(CustomFramelessDialog):
         self.tree_model = QStandardItemModel()
         
         basic_item = QStandardItem("Basic Configuration")
-        basic_item.setIcon(load_colored_svg(get_resource_path("Files/cog-box.svg"), "#A0A0A0"))
+        basic_item.setIcon(load_svg(get_resource_path("Files/cog-box.svg"), "#A0A0A0"))
         basic_item.setEditable(False)
         
         gst_item = QStandardItem("GST Parameters")
-        gst_item.setIcon(load_colored_svg(get_resource_path("Files/gst-params.svg"), "#A0A0A0"))
+        gst_item.setIcon(load_svg(get_resource_path("Files/gst-params.svg"), "#A0A0A0"))
         gst_item.setEditable(False)
         
         model_item = QStandardItem("Model Tuning")
-        model_item.setIcon(load_colored_svg(get_resource_path("Files/model-tuning.svg"), "#A0A0A0"))
+        model_item.setIcon(load_svg(get_resource_path("Files/model-tuning.svg"), "#A0A0A0"))
         model_item.setEditable(False)
         
         self.tree_model.appendRow(basic_item)
@@ -2183,10 +2279,10 @@ class CustomTitleBarWidget(QWidget):
         self.close_btn.setFixedSize(40, 40)
         self.close_btn.clicked.connect(self.close_window)
         
-        self.maximize_normal_icon = load_colored_svg(get_resource_path("Files/window-maximize.svg"), "#A0A0A0")
-        self.restore_normal_icon = load_colored_svg(get_resource_path("Files/window-restore.svg"), "#A0A0A0")
-        self.maximize_hover_icon = load_colored_svg(get_resource_path("Files/window-maximize.svg"), "white")
-        self.restore_hover_icon = load_colored_svg(get_resource_path("Files/window-restore.svg"), "white")
+        self.maximize_normal_icon = load_svg(get_resource_path("Files/window-maximize.svg"), "#A0A0A0")
+        self.restore_normal_icon = load_svg(get_resource_path("Files/window-restore.svg"), "#A0A0A0")
+        self.maximize_hover_icon = load_svg(get_resource_path("Files/window-maximize.svg"), "white")
+        self.restore_hover_icon = load_svg(get_resource_path("Files/window-restore.svg"), "white")
         
         window_controls_layout.addWidget(self.minimize_btn)
         window_controls_layout.addWidget(self.maximize_btn)
@@ -2320,6 +2416,18 @@ class MainWindow(FramelessWidget):
         self.tree_view.setColumnWidth(3, 200)
         self.tree_view.setColumnWidth(4, 150)
         self.tree_view.setMinimumHeight(250)
+        
+        self.icon_delegate = IconTextDelegate()
+        self.icon_delegate.add_icon_config(
+            column=2,  # Type column
+            text_pattern="Video",
+            icon_path=get_resource_path("Files/video-warning.svg"),
+            color="#FFA500",
+            size=14,
+            position="after",
+            spacing=1
+        )
+        self.tree_view.setItemDelegate(self.icon_delegate)
         
         self.tree_view.setSortingEnabled(True)
         self.tree_view.sortByColumn(0, Qt.AscendingOrder)
@@ -2495,11 +2603,9 @@ class MainWindow(FramelessWidget):
             
             if task_type == "subtitle":
                 type_item.setText("Subtitle")
-                type_item.setIcon(load_colored_svg(get_resource_path("Files/subtitle.svg"), "#A0A0A0"))
             elif task_type == "video":
                 type_item.setText("Video")
-                type_item.setIcon(load_colored_svg(get_resource_path("Files/video-warning.svg"), "#FFA500"))
-                type_item.setToolTip("⚠️ Will extract first subtitle track (language unknown)")
+                type_item.setToolTip("Will Extract first subtitle track (language unknown), if the format is not SRT, it will fail")
             
             desc_item = QStandardItem(description)
             desc_item.setEditable(True)
