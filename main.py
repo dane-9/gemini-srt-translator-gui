@@ -91,6 +91,14 @@ def load_stylesheet():
     except Exception as e:
         print(f"Error loading dark.qss: {e}")
         return ""
+        
+VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov'}
+
+def is_video_file(file_path):
+    return os.path.splitext(file_path)[1].lower() in VIDEO_EXTENSIONS
+
+def is_subtitle_file(file_path):
+    return os.path.splitext(file_path)[1].lower() == '.srt'
 
 CONFIG_FILE = get_resource_path("Files/config.json").replace("\\", "/")
 
@@ -118,6 +126,11 @@ DEFAULT_SETTINGS = {
     "streaming": True, 
     "thinking": True, 
     "thinking_budget": 2048,
+    "cleanup_audio_on_success": True,
+    "cleanup_audio_on_failure": False,
+    "cleanup_audio_on_cancel": False,
+    "cleanup_audio_on_remove": True,
+    "cleanup_audio_on_exit": False
 }
 
 LANGUAGES = {
@@ -161,6 +174,12 @@ class QueueStateManager:
             print(f"Error loading queue state: {e}")
         
         return {"queue_state": {}}
+        
+    def get_extracted_audio_file(self, subtitle_path):
+            if subtitle_path in self.state["queue_state"]:
+                audio_file = self.state["queue_state"][subtitle_path].get("extracted_audio_file")
+                return audio_file
+            return None
     
     def _save_queue_state(self):
         try:
@@ -173,13 +192,18 @@ class QueueStateManager:
         except Exception as e:
             print(f"Error saving queue state: {e}")
     
-    def add_subtitle_to_queue(self, subtitle_path, languages, description, output_pattern):
+    def add_subtitle_to_queue(self, subtitle_path, languages, description, output_pattern, task_type="subtitle", video_file=None, requires_extraction=False):
         if subtitle_path not in self.state["queue_state"]:
             self.state["queue_state"][subtitle_path] = {
                 "languages": {},
                 "description": description,
                 "target_languages": languages.copy(),
-                "output_pattern": output_pattern
+                "output_pattern": output_pattern,
+                "task_type": task_type,
+                "video_file": video_file,
+                "requires_audio_extraction": requires_extraction,
+                "extracted_audio_file": None,
+                "audio_extraction_status": "pending"
             }
         
         subtitle_dir = os.path.dirname(subtitle_path)
@@ -277,13 +301,6 @@ class QueueStateManager:
                     return True
         return False
     
-    def get_next_subtitle_with_work(self):
-        for subtitle_path, subtitle_data in self.state["queue_state"].items():
-            next_lang = self.get_next_language_to_process(subtitle_path)
-            if next_lang:
-                return subtitle_path
-        return None
-    
     def cleanup_completed_subtitle(self, subtitle_path):
         if subtitle_path in self.state["queue_state"]:
             languages = self.state["queue_state"][subtitle_path]["languages"]
@@ -312,11 +329,22 @@ class QueueStateManager:
         if subtitle_path in self.state["queue_state"]:
             old_entry = self.state["queue_state"][subtitle_path]
             
+            task_type = old_entry.get("task_type", "subtitle")
+            video_file = old_entry.get("video_file")
+            requires_extraction = old_entry.get("requires_audio_extraction", False)
+            extracted_audio_file = old_entry.get("extracted_audio_file")
+            audio_extraction_status = old_entry.get("audio_extraction_status", "pending")
+            
             self.state["queue_state"][subtitle_path] = {
                 "languages": {},
                 "description": description,
                 "target_languages": new_languages.copy(),
-                "output_pattern": output_pattern
+                "output_pattern": output_pattern,
+                "task_type": task_type,
+                "video_file": video_file,
+                "requires_audio_extraction": requires_extraction,
+                "extracted_audio_file": extracted_audio_file,
+                "audio_extraction_status": audio_extraction_status
             }
             
             subtitle_dir = os.path.dirname(subtitle_path)
@@ -342,6 +370,91 @@ class QueueStateManager:
                 }
             
             self._save_queue_state()
+            
+    def set_audio_extraction_status(self, subtitle_path, status, audio_file_path=None):
+        if subtitle_path in self.state["queue_state"]:
+            self.state["queue_state"][subtitle_path]["audio_extraction_status"] = status
+            if audio_file_path:
+                self.state["queue_state"][subtitle_path]["extracted_audio_file"] = audio_file_path
+            self._save_queue_state()
+    
+    def get_extracted_subtitle_file(self, subtitle_path):
+        if subtitle_path in self.state["queue_state"]:
+            subtitle_file = self.state["queue_state"][subtitle_path].get("extracted_subtitle_file")
+            return subtitle_file
+        return None
+    
+    def should_extract_audio(self, subtitle_path):
+        if subtitle_path in self.state["queue_state"]:
+            entry = self.state["queue_state"][subtitle_path]
+            return (entry.get("requires_audio_extraction", False) and 
+                    entry.get("audio_extraction_status") != "completed")
+        return False
+    
+    def get_all_extracted_audio_files(self):
+        audio_files = []
+        for subtitle_data in self.state["queue_state"].values():
+            audio_file = subtitle_data.get("extracted_audio_file")
+            if audio_file and os.path.exists(audio_file):
+                audio_files.append(audio_file)
+        return audio_files
+    
+    def cleanup_extracted_audio(self, subtitle_path):
+        if subtitle_path in self.state["queue_state"]:
+            audio_file = self.state["queue_state"][subtitle_path].get("extracted_audio_file")
+            subtitle_file = self.state["queue_state"][subtitle_path].get("extracted_subtitle_file")
+            
+            if audio_file and os.path.exists(audio_file):
+                try:
+                    os.remove(audio_file)
+                except Exception as e:
+                    pass
+            
+            if subtitle_file and os.path.exists(subtitle_file):
+                try:
+                    os.remove(subtitle_file)
+                except Exception as e:
+                    pass
+            
+            self.state["queue_state"][subtitle_path]["extracted_audio_file"] = None
+            self.state["queue_state"][subtitle_path]["extracted_subtitle_file"] = None
+            self.state["queue_state"][subtitle_path]["audio_extraction_status"] = "pending"
+            self._save_queue_state()
+            
+    def sync_audio_extraction_status(self, subtitle_path):
+        if subtitle_path not in self.state["queue_state"]:
+            return None, None
+            
+        entry = self.state["queue_state"][subtitle_path]
+        video_file = entry.get("video_file")
+        current_status = entry.get("audio_extraction_status", "pending")
+        current_audio_file = entry.get("extracted_audio_file")
+        current_extracted_subtitle = entry.get("extracted_subtitle_file")
+        
+        if current_status in ["extracting", "pending"] and video_file:
+            video_dir = os.path.dirname(video_file)
+            video_basename = os.path.basename(video_file)
+            video_name = os.path.splitext(video_basename)[0]
+            expected_audio = os.path.join(video_dir, f"{video_name}_extracted.mp3")
+            expected_subtitle = os.path.join(video_dir, f"{video_name}_extracted.srt")
+            
+            audio_exists = os.path.exists(expected_audio)
+            subtitle_exists = os.path.exists(expected_subtitle)
+            
+            if audio_exists:
+                self.state["queue_state"][subtitle_path]["audio_extraction_status"] = "completed"
+                self.state["queue_state"][subtitle_path]["extracted_audio_file"] = expected_audio
+                
+                if subtitle_exists:
+                    self.state["queue_state"][subtitle_path]["extracted_subtitle_file"] = expected_subtitle
+                else:
+                    if not current_extracted_subtitle:
+                        self.state["queue_state"][subtitle_path]["extracted_subtitle_file"] = None
+                
+                self._save_queue_state()
+                return expected_audio, expected_subtitle if subtitle_exists else current_extracted_subtitle
+        
+        return current_audio_file, current_extracted_subtitle
 
 class DialogTitleBarWidget(QWidget):
     def __init__(self, title="Dialog", parent=None):
@@ -823,6 +936,35 @@ class SettingsDialog(CustomFramelessDialog):
         self.update_queue_languages_checkbox.setToolTip("When enabled, changing the language selection will update all existing queue items that match the previous selection")
         main_layout.addWidget(self.update_queue_languages_checkbox)
         
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        main_layout.addWidget(separator)
+        
+        cleanup_label = QLabel("Delete Extracted Audio:")
+        cleanup_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        main_layout.addWidget(cleanup_label)
+        
+        cleanup_widget = QWidget()
+        cleanup_layout = QVBoxLayout(cleanup_widget)
+        cleanup_layout.setContentsMargins(20, 0, 0, 0)
+        
+        self.cleanup_checkboxes = {}
+        cleanup_items = [
+            ("cleanup_audio_on_success", "on successful translation", True),
+            ("cleanup_audio_on_failure", "on failed translation", False), 
+            ("cleanup_audio_on_cancel", "when task is cancelled", False),
+            ("cleanup_audio_on_remove", "when task is removed from queue", True),
+            ("cleanup_audio_on_exit", "on application exit", False)
+        ]
+        
+        for setting_key, label_text, default_value in cleanup_items:
+            checkbox = QCheckBox(label_text)
+            checkbox.setChecked(bool(self.settings.get(setting_key, default_value)))
+            self.cleanup_checkboxes[setting_key] = checkbox
+            cleanup_layout.addWidget(checkbox)
+        
+        main_layout.addWidget(cleanup_widget)
+        
         main_layout.addStretch()
         return page
     
@@ -1006,6 +1148,17 @@ class SettingsDialog(CustomFramelessDialog):
         for key, default_val in model_defaults.items():
             if key in self.model_checkboxes:
                 self.model_checkboxes[key].setChecked(default_val)
+                
+        cleanup_defaults = {
+            "cleanup_audio_on_success": True,
+            "cleanup_audio_on_failure": False,
+            "cleanup_audio_on_cancel": False,
+            "cleanup_audio_on_remove": True,
+            "cleanup_audio_on_exit": False
+        }
+        for key, default_val in cleanup_defaults.items():
+            if key in self.cleanup_checkboxes:
+                self.cleanup_checkboxes[key].setChecked(default_val)
         
         self.toggle_gst_settings(False)
         self.toggle_model_settings(False)
@@ -1031,6 +1184,9 @@ class SettingsDialog(CustomFramelessDialog):
         s["thinking_budget"] = self.thinking_budget_spin.value()
         
         for key, checkbox in self.model_checkboxes.items():
+            s[key] = checkbox.isChecked()
+            
+        for key, checkbox in self.cleanup_checkboxes.items():
             s[key] = checkbox.isChecked()
         
         return s
@@ -1118,7 +1274,7 @@ class TranslationWorker(QObject):
     status_message = Signal(int, str)
     language_completed = Signal(int, str, bool)
     
-    def __init__(self, task_index, input_file_path, target_languages, api_key, api_key2, model_name, settings, description="", queue_manager=None):
+    def __init__(self, task_index, input_file_path, target_languages, api_key, api_key2, model_name, settings, description="", queue_manager=None, main_window=None):
         super().__init__()
         self.task_index = task_index
         self.input_file_path = input_file_path
@@ -1129,9 +1285,21 @@ class TranslationWorker(QObject):
         self.settings = settings
         self.description = description
         self.queue_manager = queue_manager
-        self.is_cancelled = False
+        self.main_window = main_window
+        
+        self.force_cancelled = False
         self.current_language = None
         self.process = None
+        self.is_extracting = False
+        self.pending_force_cancellation = False
+    
+    def _should_stop_gracefully(self):
+        if self.main_window:
+            return self.main_window.stop_after_current_task
+        return False
+    
+    def _should_force_cancel(self):
+        return self.force_cancelled
     
     def _generate_output_filename(self, lang_code):
         original_basename = os.path.basename(self.input_file_path)
@@ -1179,6 +1347,217 @@ class TranslationWorker(QObject):
                 return None, None
         return None, None
         
+    def _extract_audio_pass(self):
+        try:
+            queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
+            video_file = queue_entry.get("video_file")
+            
+            if not video_file or not os.path.exists(video_file):
+                self.status_message.emit(self.task_index, "Video file not found")
+                return False
+            
+            self.status_message.emit(self.task_index, "Extracting audio from video...")
+            self.queue_manager.set_audio_extraction_status(self.input_file_path, "extracting")
+            
+            cmd = ["gst", "translate", "-v", video_file, "-k", self.api_key, "--extract-audio", "--no-colors"]
+            
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUNBUFFERED"] = "1"
+    
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE,
+                text=True,
+                bufsize=0,
+                env=env,
+                creationflags=0
+            )
+    
+            try:
+                self.process.stdin.write("\n")
+                self.process.stdin.flush()
+            except Exception:
+                pass
+            
+            extracted_audio_file = None
+            extracted_subtitle_file = None
+            iterations = 0
+            
+            while True:
+                iterations += 1
+                
+                if self._should_force_cancel():
+                    try:
+                        self.process.terminate()
+                        self.process.wait(timeout=2)
+                    except:
+                        try:
+                            self.process.kill()
+                        except:
+                            pass
+                    self.process = None
+                    self._cleanup_all_task_files()
+                    return False
+                
+                poll_result = self.process.poll()
+                if poll_result is not None:
+                    break
+                
+                try:
+                    line = self.process.stdout.readline()
+                    if line:
+                        import re
+                        clean_line = re.sub(r'\x1b\[[0-9;]*m', '', line.strip())
+                        
+                        if "Starting audio extraction and processing" in clean_line:
+                            self.status_message.emit(self.task_index, "Processing audio...")
+                        elif "Compressing extracted audio" in clean_line:
+                            self.status_message.emit(self.task_index, "Compressing audio...")
+                        elif "Success! Audio saved as:" in clean_line:
+                            if ":" in clean_line:
+                                extracted_audio_file = clean_line.split("Success! Audio saved as:")[-1].strip()
+                        elif "Final file size:" in clean_line:
+                            pass
+                        elif "Extracting subtitles from video file" in clean_line:
+                            self.status_message.emit(self.task_index, "Extracting subtitles...")
+                        elif "Success! Subtitles saved as:" in clean_line:
+                            if ":" in clean_line:
+                                extracted_subtitle_file = clean_line.split("Success! Subtitles saved as:")[-1].strip()
+                        elif "extracted.srt" in clean_line and "saved" in clean_line.lower():
+                            import re
+                            subtitle_match = re.search(r'([^\s]+_extracted\.srt)', clean_line)
+                            if subtitle_match:
+                                extracted_subtitle_file = subtitle_match.group(1)
+                                if not os.path.isabs(extracted_subtitle_file):
+                                    video_dir = os.path.dirname(video_file)
+                                    extracted_subtitle_file = os.path.join(video_dir, extracted_subtitle_file)
+                        elif "Please provide a target language" in clean_line:
+                            try:
+                                self.process.stdin.write("\n")
+                                self.process.stdin.flush()
+                            except:
+                                pass
+                            break
+                            
+                except Exception:
+                    break
+                
+                try:
+                    line = self.process.stderr.readline()
+                    if line:
+                        import re
+                        clean_line = re.sub(r'\x1b\[[0-9;]*m', '', line.strip())
+                except:
+                    pass
+                
+                if iterations > 600:
+                    self.process.terminate()
+                    break
+                
+                time.sleep(0.1)
+    
+            try:
+                stdout, stderr = self.process.communicate(timeout=5)
+                if stdout:
+                    import re
+                    clean_stdout = re.sub(r'\x1b\[[0-9;]*m', '', stdout)
+                    
+                    if "Success! Audio saved as:" in clean_stdout and not extracted_audio_file:
+                        lines = clean_stdout.split('\n')
+                        for line in lines:
+                            if "Success! Audio saved as:" in line:
+                                extracted_audio_file = line.split("Success! Audio saved as:")[-1].strip()
+                                break
+                    
+                    if not extracted_subtitle_file:
+                        lines = clean_stdout.split('\n')
+                        for line in lines:
+                            if "Success! Subtitles saved as:" in line:
+                                extracted_subtitle_file = line.split("Success! Subtitles saved as:")[-1].strip()
+                                break
+                            elif "extracted.srt" in line and "saved" in line.lower():
+                                import re
+                                subtitle_match = re.search(r'([^\s]+_extracted\.srt)', line)
+                                if subtitle_match:
+                                    extracted_subtitle_file = subtitle_match.group(1)
+                                    if not os.path.isabs(extracted_subtitle_file):
+                                        video_dir = os.path.dirname(video_file)
+                                        extracted_subtitle_file = os.path.join(video_dir, extracted_subtitle_file)
+                                    break
+                                
+                if stderr:
+                    import re
+                    clean_stderr = re.sub(r'\x1b\[[0-9;]*m', '', stderr)
+            except:
+                pass
+    
+            return_code = self.process.returncode if self.process else -1
+            self.process = None
+    
+            if self._should_force_cancel():
+                self._cleanup_all_task_files()
+                return False
+    
+            video_basename = os.path.basename(video_file)
+            video_name = os.path.splitext(video_basename)[0]
+            video_dir = os.path.dirname(video_file)
+            
+            if not extracted_audio_file:
+                expected_audio = os.path.join(video_dir, f"{video_name}_extracted.mp3")
+                if os.path.exists(expected_audio):
+                    extracted_audio_file = expected_audio
+            
+            if not extracted_subtitle_file:
+                expected_subtitle = os.path.join(video_dir, f"{video_name}_extracted.srt")
+                if os.path.exists(expected_subtitle):
+                    extracted_subtitle_file = expected_subtitle
+    
+            if extracted_audio_file and os.path.exists(extracted_audio_file):
+                self.queue_manager.set_audio_extraction_status(
+                    self.input_file_path, 
+                    "completed", 
+                    extracted_audio_file
+                )
+                
+                if extracted_subtitle_file and os.path.exists(extracted_subtitle_file):
+                    if self.input_file_path in self.queue_manager.state["queue_state"]:
+                        self.queue_manager.state["queue_state"][self.input_file_path]["extracted_subtitle_file"] = extracted_subtitle_file
+                        self.queue_manager._save_queue_state()
+                
+                self.status_message.emit(self.task_index, "Audio extraction successful")
+                return True
+            else:
+                expected_audio = os.path.join(video_dir, f"{video_name}_extracted.mp3")
+                expected_subtitle = os.path.join(video_dir, f"{video_name}_extracted.srt")
+                
+                if os.path.exists(expected_audio):
+                    self.queue_manager.set_audio_extraction_status(
+                        self.input_file_path, 
+                        "completed", 
+                        expected_audio
+                    )
+                    
+                    if os.path.exists(expected_subtitle):
+                        if self.input_file_path in self.queue_manager.state["queue_state"]:
+                            self.queue_manager.state["queue_state"][self.input_file_path]["extracted_subtitle_file"] = expected_subtitle
+                            self.queue_manager._save_queue_state()
+                    
+                    self.status_message.emit(self.task_index, "Audio extraction successful")
+                    return True
+                
+                self.queue_manager.set_audio_extraction_status(self.input_file_path, "failed")
+                self.status_message.emit(self.task_index, "Audio extraction failed")
+                return False
+    
+        except Exception:
+            if self._should_force_cancel():
+                self._cleanup_all_task_files()
+            self.queue_manager.set_audio_extraction_status(self.input_file_path, "failed")
+            return False
+        
     def _cleanup_for_fresh_start(self, target_language):
         try:
             progress_file = self._get_progress_file_path()
@@ -1208,6 +1587,10 @@ class TranslationWorker(QObject):
         
         if self.description:
             cmd.extend(["-d", self.description])
+        
+        extracted_audio = self.queue_manager.get_extracted_audio_file(self.input_file_path)
+        if extracted_audio and os.path.exists(extracted_audio):
+            cmd.extend(["-a", extracted_audio])
         
         progress_line, progress_lang = self._detect_progress_file()
         auto_resume_enabled = self.settings.get("auto_resume", True)
@@ -1243,6 +1626,162 @@ class TranslationWorker(QObject):
                 cmd.append("--no-thinking")
         
         return cmd
+        
+    def _build_video_only_command(self, video_file, target_language):
+        cmd = ["gst", "translate"]
+        
+        cmd.extend(["-k", self.api_key])
+        cmd.extend(["-l", target_language])
+        cmd.extend(["-v", video_file])
+        cmd.extend(["-m", self.model_name])
+        
+        output_path = self._generate_output_filename(target_language)
+        cmd.extend(["-o", output_path])
+        
+        if self.api_key2:
+            cmd.extend(["-k2", self.api_key2])
+        
+        if self.description:
+            cmd.extend(["-d", self.description])
+        
+        if self.settings.get("use_gst_parameters", False):
+            cmd.extend(["-b", str(self.settings.get("batch_size", 30))])
+            
+            if not self.settings.get("free_quota", True):
+                cmd.append("--paid-quota")
+            if self.settings.get("skip_upgrade", False):
+                cmd.append("--skip-upgrade")
+            if self.settings.get("progress_log", False):
+                cmd.append("--progress-log")
+            if self.settings.get("thoughts_log", False):
+                cmd.append("--thoughts-log")
+    
+        cmd.append("--no-colors")
+    
+        if self.settings.get("use_model_tuning", False):
+            cmd.extend(["--temperature", str(self.settings.get("temperature", 0.7))])
+            cmd.extend(["--top-p", str(self.settings.get("top_p", 0.95))])
+            cmd.extend(["--top-k", str(self.settings.get("top_k", 40))])
+            cmd.extend(["--thinking-budget", str(self.settings.get("thinking_budget", 2048))])
+            
+            if not self.settings.get("streaming", True):
+                cmd.append("--no-streaming")
+            if not self.settings.get("thinking", True):
+                cmd.append("--no-thinking")
+        
+        return cmd
+        
+    def _execute_translation_command(self, cmd, lang_code, completed_count, total_languages):
+        lang_name = self._get_language_name(lang_code)
+        
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUNBUFFERED"] = "1"
+    
+        self.process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=0,
+            env=env,
+            creationflags=0
+        )
+    
+        found_completion = False
+        line_count = 0
+        
+        is_video_command = "-v" in cmd and "--extract-audio" not in cmd
+        if is_video_command:
+            self.is_extracting = True
+    
+        for line in iter(self.process.stdout.readline, ''):
+            line_count += 1
+            
+            if self._should_force_cancel():
+                if is_video_command and self.is_extracting and not self.pending_force_cancellation:
+                    self.pending_force_cancellation = True
+                    continue
+                else:
+                    self._send_interrupt_signal()
+                    break
+    
+            line = line.strip()
+            if not line:
+                continue
+            
+            if is_video_command:
+                if ("Please provide a target language" in line or 
+                    "Final file size:" in line or
+                    "Translation completed successfully!" in line):
+                    self.is_extracting = False
+                    
+                    if self.pending_force_cancellation:
+                        self._send_interrupt_signal()
+                        break
+    
+            if self._should_stop_gracefully() and not is_video_command:
+                if "Translating:" in line:
+                    progress_match = re.search(r"(\d+)%", line)
+                    if progress_match:
+                        percent = int(progress_match.group(1))
+                        if percent > 10 and percent % 10 == 0:
+                            self._send_interrupt_signal()
+                            break
+    
+            if "Resuming from line" in line:
+                resume_match = re.search(r"Resuming from line (\d+)", line)
+                if resume_match:
+                    resume_line = resume_match.group(1)
+                    self.status_message.emit(self.task_index, f"Resuming {lang_name} from line {resume_line}")
+                continue
+    
+            progress_match = re.search(r"Translating:\s*\|.*\|\s*(\d+)%\s*\(([^)]+)\)[^|]*\|\s*(Thinking|Processing)", line)
+            
+            if progress_match:
+                lang_percent = int(progress_match.group(1))
+                details = progress_match.group(2)
+                state = progress_match.group(3)
+                
+                overall_progress = int((completed_count / total_languages) * 100 + (lang_percent / total_languages))
+    
+                action_str = f"{details} | {state}..."
+                
+                if total_languages > 1:
+                    overall_progress_str = f"[{completed_count + 1}/{total_languages}]"
+                    status_text = f"{overall_progress_str} Translating {lang_name}: {action_str}"
+                else:
+                    status_text = f"Translating {lang_name}: {action_str}"
+                
+                self.progress_update.emit(self.task_index, overall_progress, status_text)
+                continue
+    
+            elif "Translation completed successfully!" in line:
+                found_completion = True
+                break
+    
+        if self.process.stderr:
+            try:
+                stderr_output = self.process.stderr.read()
+                if stderr_output:
+                    print(f"GST stderr output: {stderr_output}")
+            except:
+                pass
+    
+        return_code = self.process.wait()
+        self.process = None
+        
+        self.is_extracting = False
+        self.pending_force_cancellation = False
+    
+        if self._should_force_cancel():
+            self._cleanup_all_task_files()
+            return False
+        
+        if self._should_stop_gracefully():
+            return return_code == 0 or found_completion
+    
+        return return_code == 0 and found_completion
     
     def _get_language_name(self, lang_code):
         for name, code in LANGUAGES.items():
@@ -1270,26 +1809,180 @@ class TranslationWorker(QObject):
             except Exception as e:
                 print(f"Error sending interrupt signal: {e}")
                 self.process.terminate()
-    
-    @Slot()
+                
+    def _cleanup_all_task_files(self):
+        try:
+            progress_file = self._get_progress_file_path()
+            if os.path.exists(progress_file):
+                os.remove(progress_file)
+            
+            original_basename = os.path.basename(self.input_file_path)
+            name_part, ext = os.path.splitext(original_basename)
+            original_dir = os.path.dirname(self.input_file_path)
+            
+            for code in LANGUAGES.values():
+                if name_part.endswith(f".{code}"):
+                    name_part = name_part[:-len(f".{code}")]
+                    break
+            
+            pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+            for lang_code in self.target_languages:
+                file_lang_code = lang_code
+                if file_lang_code.startswith('zh'):
+                    file_lang_code = 'zh'
+                elif file_lang_code.startswith('pt'):
+                    file_lang_code = 'pt'
+                
+                output_filename = pattern.format(original_name=name_part, lang_code=file_lang_code)
+                output_file = os.path.join(original_dir, output_filename)
+                if os.path.exists(output_file):
+                    os.remove(output_file)
+            
+            if self.queue_manager:
+                extracted_subtitle = self.queue_manager.get_extracted_subtitle_file(self.input_file_path)
+                if extracted_subtitle and os.path.exists(extracted_subtitle):
+                    os.remove(extracted_subtitle)
+                
+                should_cleanup_audio = self.settings.get("cleanup_audio_on_cancel", False)
+                
+                if should_cleanup_audio:
+                    audio_file = self.queue_manager.get_extracted_audio_file(self.input_file_path)
+                    if audio_file and os.path.exists(audio_file):
+                        os.remove(audio_file)
+                    
+                    self.queue_manager.cleanup_extracted_audio(self.input_file_path)
+                else:
+                    if self.input_file_path in self.queue_manager.state["queue_state"]:
+                        self.queue_manager.state["queue_state"][self.input_file_path]["extracted_subtitle_file"] = None
+                        self.queue_manager._save_queue_state()
+                
+                for lang_code in self.target_languages:
+                    self.queue_manager.mark_language_queued(self.input_file_path, lang_code)
+                
+                if should_cleanup_audio:
+                    queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
+                    if queue_entry.get("requires_audio_extraction", False):
+                        self.queue_manager.set_audio_extraction_status(self.input_file_path, "pending")
+            
+        except Exception as e:
+            print(f"Error during force cancel cleanup: {e}")
+                
     def run(self):
-        if self.is_cancelled:
-            self.finished.emit(self.task_index, "Cancelled before start", False)
+        if self._should_force_cancel():
+            self._cleanup_all_task_files()
+            self.finished.emit(self.task_index, "Force Cancelled", False)
             return
-
+    
         if not self.queue_manager:
             self.finished.emit(self.task_index, "Queue manager not available", False)
             return
-
+    
+        queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
+        task_type = queue_entry.get("task_type", "subtitle")
+        
+        success = False
+        if task_type == "video+subtitle":
+            success = self._handle_video_subtitle_workflow()
+        elif task_type == "video":
+            success = self._handle_video_only_workflow()
+        else:
+            success = self._handle_subtitle_only_workflow()
+        
+        if self._should_force_cancel():
+            self._cleanup_all_task_files()
+            self.finished.emit(self.task_index, "Force Cancelled & Reset", False)
+        elif self._should_stop_gracefully():
+            if success:
+                self.finished.emit(self.task_index, "Completed (Queue Stopping)", True)
+            else:
+                self.finished.emit(self.task_index, "Failed (Queue Stopping)", False)
+        elif success:
+            self.finished.emit(self.task_index, "Translated", True)
+        else:
+            self.finished.emit(self.task_index, "Translation failed", False)
+            
+    def _handle_video_subtitle_workflow(self):
+        if self.queue_manager.should_extract_audio(self.input_file_path):
+            success = self._extract_audio_pass()
+            if not success or self._should_force_cancel():
+                return False
+        
+        return self._translate_with_languages()
+    
+    def _handle_video_only_workflow(self):
+        if self._should_force_cancel():
+            return False
+            
+        queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
+        video_file = queue_entry.get("video_file", self.input_file_path)
+        
+        if not os.path.exists(video_file):
+            self.status_message.emit(self.task_index, "Video file not found")
+            return False
+        
+        completed_count = 0
+        total_languages = len(self.target_languages)
+        
+        for lang_code in self.target_languages:
+            if self._should_force_cancel():
+                return False
+            
+            if self._should_stop_gracefully() and completed_count > 0:
+                break
+                
+            self.current_language = lang_code
+            lang_name = self._get_language_name(lang_code)
+            
+            try:
+                self.queue_manager.mark_language_in_progress(self.input_file_path, lang_code)
+                self.status_message.emit(self.task_index, f"Extracting and translating to {lang_name}...")
+                
+                cmd = self._build_video_only_command(video_file, lang_code)
+                
+                success = self._execute_translation_command(cmd, lang_code, completed_count, total_languages)
+                
+                if self._should_force_cancel():
+                    return False
+                
+                if success:
+                    self.queue_manager.mark_language_completed(self.input_file_path, lang_code)
+                    completed_count += 1
+                    self.language_completed.emit(self.task_index, lang_code, True)
+                else:
+                    self.queue_manager.mark_language_queued(self.input_file_path, lang_code)
+                    self.language_completed.emit(self.task_index, lang_code, False)
+                    
+            except Exception as e:
+                print(f"Exception during video-only translation of {lang_code}: {e}")
+                self.queue_manager.mark_language_queued(self.input_file_path, lang_code)
+                self.language_completed.emit(self.task_index, lang_code, False)
+        
+        if self._should_force_cancel():
+            return False
+        
+        final_summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
+        if final_summary == "Translated":
+            self.queue_manager.cleanup_completed_subtitle(self.input_file_path)
+            return True
+        else:
+            return completed_count > 0
+    
+    def _handle_subtitle_only_workflow(self):
+        return self._translate_with_languages()
+    
+    def _translate_with_languages(self):
         completed_count = 0
         total_languages = len(self.target_languages)
         
         while True:
-            if self.is_cancelled:
-                break
+            if self._should_force_cancel():
+                return False
             
             next_lang = self.queue_manager.get_next_language_to_process(self.input_file_path)
             if not next_lang:
+                break
+            
+            if self._should_stop_gracefully() and completed_count > 0:
                 break
             
             self.current_language = next_lang
@@ -1312,143 +2005,43 @@ class TranslationWorker(QObject):
                 
                 cmd = self._build_cli_command(next_lang)
                 
-                env = os.environ.copy()
-                env["PYTHONIOENCODING"] = "utf-8"
-                env["PYTHONUNBUFFERED"] = "1"
-
-                self.process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=0,
-                    env=env,
-                    creationflags=0
-                )
-
-                found_completion = False
-                line_count = 0
-
-                for line in iter(self.process.stdout.readline, ''):
-                    line_count += 1
-                    if self.is_cancelled:
-                        self._send_interrupt_signal()
-                        
-                        progress_saved = False
-                        timeout_counter = 0
-                        max_timeout = 50
-                        
-                        while timeout_counter < max_timeout and not progress_saved:
-                            try:
-                                stdout_line = self.process.stdout.readline()
-                                if stdout_line and "Progress saved." in stdout_line:
-                                    progress_saved = True
-                                    break
-                            except:
-                                pass
-                                
-                            try:
-                                stderr_line = self.process.stderr.readline()
-                                if stderr_line and "Progress saved." in stderr_line:
-                                    progress_saved = True
-                                    break
-                            except:
-                                pass
-                            
-                            if self.process.poll() is not None:
-                                break
-                                
-                            time.sleep(0.1)
-                            timeout_counter += 1
-                        
-                        if not progress_saved and self.process.poll() is None:
-                            self.process.terminate()
-                        
-                        break
-
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    if "Resuming from line" in line:
-                        resume_match = re.search(r"Resuming from line (\d+)", line)
-                        if resume_match:
-                            resume_line = resume_match.group(1)
-                            self.status_message.emit(self.task_index, f"Resuming {lang_name} from line {resume_line}")
-                        continue
-
-                    progress_match = re.search(r"Translating:\s*\|.*\|\s*(\d+)%\s*\(([^)]+)\)[^|]*\|\s*(Thinking|Processing)", line)
-                    
-                    if progress_match:
-                        lang_percent = int(progress_match.group(1))
-                        details = progress_match.group(2)
-                        state = progress_match.group(3)
-                        
-                        overall_progress = int((completed_count / total_languages) * 100 + (lang_percent / total_languages))
-
-                        action_str = f"{details} | {state}..."
-                        
-                        if total_languages > 1:
-                            overall_progress_str = f"[{completed_count + 1}/{total_languages}]"
-                            status_text = f"{overall_progress_str} Translating {lang_name}: {action_str}"
-                        else:
-                            status_text = f"Translating {lang_name}: {action_str}"
-                        
-                        self.progress_update.emit(self.task_index, overall_progress, status_text)
-                        continue
-
-                    elif "Translation completed successfully!" in line:
-                        found_completion = True
-                        break
-
-                if self.process.stderr:
-                    try:
-                        stderr_output = self.process.stderr.read()
-                        if stderr_output:
-                            print(f"GST stderr output: {stderr_output}")
-                    except:
-                        pass
-
-                return_code = self.process.wait()
-                self.process = None
-
-                if self.is_cancelled:
-                    summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
-                    self.finished.emit(self.task_index, summary, False)
-                    return
-
-                if return_code == 0 and found_completion:
+                success = self._execute_translation_command(cmd, next_lang, completed_count, total_languages)
+                
+                if self._should_force_cancel():
+                    return False
+                
+                if success:
                     self.queue_manager.mark_language_completed(self.input_file_path, next_lang)
                     completed_count += 1
                     self.language_completed.emit(self.task_index, next_lang, True)
                 else:
                     self.queue_manager.mark_language_queued(self.input_file_path, next_lang)
                     self.language_completed.emit(self.task_index, next_lang, False)
-
+    
             except Exception as e:
                 print(f"Exception during translation of {next_lang}: {e}")
-                if self.is_cancelled:
-                    summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
-                    self.finished.emit(self.task_index, summary, False)
-                    return
+                if self._should_force_cancel():
+                    return False
                 else:
                     self.queue_manager.mark_language_queued(self.input_file_path, next_lang)
                     self.language_completed.emit(self.task_index, next_lang, False)
-
-        if self.is_cancelled:
-            summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
-            self.finished.emit(self.task_index, summary, False)
+    
+        if self._should_force_cancel():
+            return False
+        
+        final_summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
+        if final_summary == "Translated":
+            self.queue_manager.cleanup_completed_subtitle(self.input_file_path)
+            return True
         else:
-            final_summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
-            if final_summary == "Translated":
-                self.queue_manager.cleanup_completed_subtitle(self.input_file_path)
-                self.finished.emit(self.task_index, "Translated", True)
-            else:
-                self.finished.emit(self.task_index, final_summary, False)
+            return completed_count > 0
+    
+    def force_cancel(self):
+        self.force_cancelled = True
+        self.status_message.emit(self.task_index, "Force cancelling...")
     
     def cancel(self):
-        self.is_cancelled = True
-        self.status_message.emit(self.task_index, "Cancelling...")
+        self.force_cancel()
 
 class CustomLineEdit(QLineEdit):
     def __init__(self, parent=None):
@@ -1654,6 +2247,7 @@ class MainWindow(FramelessWidget):
         self.active_worker = None
         self.clipboard_description = ""
         self.is_running = False
+        self.stop_after_current_task = False
         self._exit_timer = None
         
         title_bar = self.getTitleBar()
@@ -1711,19 +2305,20 @@ class MainWindow(FramelessWidget):
         
         self.tree_view = QTreeView()
         self.tree_view.setAlternatingRowColors(True)
-        self.tree_view.setRootIsDecorated(False)
+        self.tree_view.setRootIsDecorated(True)
         self.tree_view.setUniformRowHeights(True)
         self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree_view.customContextMenuRequested.connect(self.show_context_menu)
         self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
         self.model = QStandardItemModel()
-        self.model.setHorizontalHeaderLabels(["File Name", "Output Languages", "Description", "Status"])
+        self.model.setHorizontalHeaderLabels(["File Name", "Output Languages", "Type", "Description", "Status"])
         self.model.itemChanged.connect(self.on_item_changed)
         self.tree_view.setModel(self.model)
-        self.tree_view.setColumnWidth(0, 480)
+        self.tree_view.setColumnWidth(0, 400)
         self.tree_view.setColumnWidth(1, 120)
-        self.tree_view.setColumnWidth(2, 200)
-        self.tree_view.setColumnWidth(3, 150)
+        self.tree_view.setColumnWidth(2, 80)
+        self.tree_view.setColumnWidth(3, 200)
+        self.tree_view.setColumnWidth(4, 150)
         self.tree_view.setMinimumHeight(250)
         
         self.tree_view.setSortingEnabled(True)
@@ -1806,52 +2401,127 @@ class MainWindow(FramelessWidget):
         queue_state = self.queue_manager.state.get("queue_state", {})
         
         for subtitle_path, subtitle_data in queue_state.items():
-            if os.path.exists(subtitle_path):
-                target_languages = subtitle_data.get("target_languages", [])
-                description = subtitle_data.get("description", "")
+            if not os.path.exists(subtitle_path):
+                continue
                 
-                task_exists = any(task['path'] == subtitle_path and task['languages'] == target_languages for task in self.tasks)
+            target_languages = subtitle_data.get("target_languages", [])
+            description = subtitle_data.get("description", "")
+            task_type = subtitle_data.get("task_type", "subtitle")
+            video_file = subtitle_data.get("video_file")
+            
+            if task_type == "video+subtitle":
+                if not video_file or not os.path.exists(video_file):
+                    task_type = "subtitle"
+                    subtitle_data["task_type"] = "subtitle"
+                    subtitle_data["video_file"] = None
+                    subtitle_data["requires_audio_extraction"] = False
+                    self.queue_manager._save_queue_state()
+            
+            task_exists = any(task['path'] == subtitle_path and task['languages'] == target_languages for task in self.tasks)
+            
+            if not task_exists:
+                self._add_task_to_ui(subtitle_path, target_languages, description, task_type)
                 
-                if not task_exists:
-                    self._add_task_to_ui(subtitle_path, target_languages, description)
-                    
-                    for task in self.tasks:
-                        if task['path'] == subtitle_path:
-                            summary = self.queue_manager.get_language_progress_summary(subtitle_path)
-                            task["status_item"].setText(summary)
-                            break
+                for task in self.tasks:
+                    if task['path'] == subtitle_path:
+                        summary = self.queue_manager.get_language_progress_summary(subtitle_path)
+                        task["status_item"].setText(summary)
+                        break
     
-    def _add_task_to_ui(self, file_path, languages, description):
+    def _add_task_to_ui(self, file_path, languages, description, task_type="subtitle"):
         lang_display = self._get_language_display_text(languages)
         lang_tooltip = self._format_language_tooltip(languages)
         
-        path_item = QStandardItem(os.path.basename(file_path))
-        path_item.setToolTip(os.path.dirname(file_path))
-        path_item.setEditable(False)
-        
-        lang_item = QStandardItem(lang_display)
-        lang_item.setToolTip(lang_tooltip)
-        lang_item.setEditable(False)
-        
-        desc_item = QStandardItem(description)
-        desc_item.setEditable(True)
-        desc_item.setToolTip(description)
-        
-        status_item = QStandardItem("Queued")
-        status_item.setEditable(False)
-        
-        self.model.appendRow([path_item, lang_item, desc_item, status_item])
-        self.tasks.append({
-            "path": file_path, 
-            "path_item": path_item, 
-            "lang_item": lang_item,
-            "desc_item": desc_item, 
-            "status_item": status_item, 
-            "description": description,
-            "languages": languages.copy(),
-            "worker": None, 
-            "thread": None
-        })
+        if task_type == "video+subtitle":
+            if is_video_file(file_path):
+                video_path = file_path
+                subtitle_path = self._find_subtitle_pair(file_path)
+            else:
+                subtitle_path = file_path
+                video_path = self._find_video_pair(file_path)
+            
+            video_item = QStandardItem(os.path.basename(video_path))
+            video_item.setToolTip(os.path.dirname(video_path))
+            video_item.setEditable(False)
+            
+            lang_item = QStandardItem(lang_display)
+            lang_item.setToolTip(lang_tooltip)
+            lang_item.setEditable(False)
+            
+            type_item = QStandardItem("Video+Sub")
+            type_item.setEditable(False)
+            
+            desc_item = QStandardItem(description)
+            desc_item.setEditable(True)
+            desc_item.setToolTip(description)
+            
+            status_item = QStandardItem("Queued")
+            status_item.setEditable(False)
+            
+            subtitle_child = QStandardItem(f"{os.path.basename(subtitle_path)}")
+            subtitle_child.setToolTip(f"Subtitle: {subtitle_path}")
+            subtitle_child.setEditable(False)
+            
+            video_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem(""), QStandardItem("")])
+            
+            self.model.appendRow([video_item, lang_item, type_item, desc_item, status_item])
+            
+            self.tasks.append({
+                "path": subtitle_path,
+                "video_path": video_path,
+                "path_item": video_item, 
+                "lang_item": lang_item,
+                "type_item": type_item,
+                "desc_item": desc_item, 
+                "status_item": status_item, 
+                "description": description,
+                "languages": languages.copy(),
+                "task_type": task_type,
+                "worker": None, 
+                "thread": None
+            })
+            
+        else:
+            path_item = QStandardItem(os.path.basename(file_path))
+            path_item.setToolTip(os.path.dirname(file_path))
+            path_item.setEditable(False)
+            
+            lang_item = QStandardItem(lang_display)
+            lang_item.setToolTip(lang_tooltip)
+            lang_item.setEditable(False)
+            
+            type_item = QStandardItem()
+            type_item.setEditable(False)
+            
+            if task_type == "subtitle":
+                type_item.setText("Subtitle")
+                type_item.setIcon(load_colored_svg(get_resource_path("Files/subtitle.svg"), "#A0A0A0"))
+            elif task_type == "video":
+                type_item.setText("Video")
+                type_item.setIcon(load_colored_svg(get_resource_path("Files/video-warning.svg"), "#FFA500"))
+                type_item.setToolTip("⚠️ Will extract first subtitle track (language unknown)")
+            
+            desc_item = QStandardItem(description)
+            desc_item.setEditable(True)
+            desc_item.setToolTip(description)
+            
+            status_item = QStandardItem("Queued")
+            status_item.setEditable(False)
+            
+            self.model.appendRow([path_item, lang_item, type_item, desc_item, status_item])
+            self.tasks.append({
+                "path": file_path, 
+                "path_item": path_item, 
+                "lang_item": lang_item,
+                "type_item": type_item,
+                "desc_item": desc_item, 
+                "status_item": status_item, 
+                "description": description,
+                "languages": languages.copy(),
+                "task_type": task_type,
+                "worker": None, 
+                "thread": None
+            })
         
     def _get_language_display_text(self, lang_codes):
         if len(lang_codes) <= 2:
@@ -1862,9 +2532,37 @@ class MainWindow(FramelessWidget):
 
     def toggle_start_stop(self):
         if self.is_running:
-            self.stop_translation_action()
+            if self.stop_after_current_task:
+                current_task_name = ""
+                if 0 <= self.current_task_index < len(self.tasks):
+                    task_path = self.tasks[self.current_task_index]["path"]
+                    current_task_name = os.path.basename(task_path)
+                
+                reply = CustomMessageBox.question(
+                    self, 
+                    'Force Cancel & Reset', 
+                    f'Force cancel the current translation?\n\nFile: {current_task_name}',
+                    QMessageBox.Yes | QMessageBox.No, 
+                    QMessageBox.No,
+                    "⚠️ WARNING: This will immediately stop translation and DELETE all progress files, output files, and extracted audio for this task. You will need to start over completely."
+                )
+                if reply == QMessageBox.Yes:
+                    self.force_stop_translation()
+            else:
+                self.stop_translation_action()
         else:
             self.start_translation_queue()
+            
+    def force_stop_translation(self):
+        if self.active_worker and self.is_running:
+            self.stop_after_current_task = True
+            self.start_stop_btn.setText("Force Cancelling & Resetting...")
+            self.start_stop_btn.setEnabled(False)
+            
+            if 0 <= self.current_task_index < len(self.tasks):
+                self.tasks[self.current_task_index]["status_item"].setText("Force cancelling & resetting...")
+            
+            self.active_worker.force_cancel()
 
     def on_item_changed(self, item):
         if item.column() == 2:
@@ -1962,36 +2660,76 @@ class MainWindow(FramelessWidget):
             remaining = len(language_names) - max_display
             return f"{displayed} and {remaining} more..."
     
-    def _cleanup_task_files(self, task):
-        original_basename = os.path.basename(task["path"])
-        name_part, ext = os.path.splitext(original_basename)
-        original_dir = os.path.dirname(task["path"])
-        
-        progress_file = os.path.join(original_dir, f"{name_part}.progress")
-        if os.path.exists(progress_file):
-            try:
-                os.remove(progress_file)
-            except Exception:
-                pass
-        
-        pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
-        for code in LANGUAGES.values():
-            if name_part.endswith(f".{code}"):
-                name_part = name_part[:-len(f".{code}")]
-                break
-        
-        for lang_code in task["languages"]:
-            output_filename = pattern.format(original_name=name_part, lang_code=lang_code)
-            output_file = os.path.join(original_dir, output_filename)
-            if os.path.exists(output_file):
-                try:
-                    os.remove(output_file)
-                except Exception:
-                    pass
-    
     def _cleanup_all_task_files(self):
-        for task in self.tasks:
-            self._cleanup_task_files(task)
+        try:
+            progress_file = self._get_progress_file_path()
+            if os.path.exists(progress_file):
+                os.remove(progress_file)
+            
+            original_basename = os.path.basename(self.input_file_path)
+            name_part, ext = os.path.splitext(original_basename)
+            original_dir = os.path.dirname(self.input_file_path)
+            
+            for code in LANGUAGES.values():
+                if name_part.endswith(f".{code}"):
+                    name_part = name_part[:-len(f".{code}")]
+                    break
+            
+            pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+            for lang_code in self.target_languages:
+                output_filename = pattern.format(original_name=name_part, lang_code=lang_code.replace('-', '_'))
+                output_file = os.path.join(original_dir, output_filename)
+                if os.path.exists(output_file):
+                    os.remove(output_file)
+
+            if self.queue_manager:
+                files_to_delete = set()
+                
+                state_managed_subtitle = self.queue_manager.get_extracted_subtitle_file(self.input_file_path)
+                if state_managed_subtitle:
+                    files_to_delete.add(state_managed_subtitle)
+
+                queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
+                source_file_for_naming = queue_entry.get("video_file") or self.input_file_path
+                
+                base_dir = os.path.dirname(source_file_for_naming)
+                file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
+                
+                for code in LANGUAGES.values():
+                    if file_name_without_ext.endswith(f".{code}"):
+                        file_name_without_ext = file_name_without_ext[:-len(f".{code}")]
+                        break
+
+                predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
+                files_to_delete.add(predicted_subtitle_path)
+
+                for file_path in files_to_delete:
+                    if file_path and os.path.exists(file_path):
+                        os.remove(file_path)
+                
+                should_cleanup_audio = self.settings.get("cleanup_audio_on_cancel", False)
+                
+                if should_cleanup_audio:
+                    audio_file = self.queue_manager.get_extracted_audio_file(self.input_file_path)
+                    if audio_file and os.path.exists(audio_file):
+                        os.remove(audio_file)
+                    
+                    self.queue_manager.cleanup_extracted_audio(self.input_file_path)
+                else:
+                    if self.input_file_path in self.queue_manager.state["queue_state"]:
+                        self.queue_manager.state["queue_state"][self.input_file_path]["extracted_subtitle_file"] = None
+                        self.queue_manager._save_queue_state()
+                
+                for lang_code in self.target_languages:
+                    self.queue_manager.mark_language_queued(self.input_file_path, lang_code)
+                
+                if should_cleanup_audio:
+                    queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
+                    if queue_entry.get("requires_audio_extraction", False):
+                        self.queue_manager.set_audio_extraction_status(self.input_file_path, "pending")
+            
+        except Exception as e:
+            pass
                 
     def open_language_selection(self):
         dialog = LanguageSelectionDialog(self.selected_languages, self)
@@ -2033,18 +2771,21 @@ class MainWindow(FramelessWidget):
         if not item.isValid():
             return
         
-        selected_indexes = self.tree_view.selectionModel().selectedRows()
-        if not selected_indexes:
+        if item.parent().isValid():
+            return
+        
+        selected_rows = self._get_selected_task_rows()
+        if not selected_rows:
             return
         
         menu = QMenu(self)
         
-        if len(selected_indexes) == 1:
+        if len(selected_rows) == 1:
             edit_desc_action = QAction("Edit Description", self)
             edit_desc_action.triggered.connect(self.edit_single_description)
             menu.addAction(edit_desc_action)
             
-            row = selected_indexes[0].row()
+            row = selected_rows[0]
             if 0 <= row < len(self.tasks):
                 current_desc = self.tasks[row]["description"]
                 if current_desc:
@@ -2052,15 +2793,15 @@ class MainWindow(FramelessWidget):
                     copy_desc_action.triggered.connect(self.copy_description)
                     menu.addAction(copy_desc_action)
         
-        if len(selected_indexes) > 1:
+        if len(selected_rows) > 1:
             bulk_edit_action = QAction("Bulk Edit Description", self)
             bulk_edit_action.triggered.connect(self.bulk_edit_description)
             menu.addAction(bulk_edit_action)
         
         if self.clipboard_description:
             should_show_apply = True
-            if len(selected_indexes) == 1:
-                row = selected_indexes[0].row()
+            if len(selected_rows) == 1:
+                row = selected_rows[0]
                 if 0 <= row < len(self.tasks):
                     current_desc = self.tasks[row]["description"]
                     if current_desc == self.clipboard_description:
@@ -2105,8 +2846,7 @@ class MainWindow(FramelessWidget):
         menu.addAction(remove_action)
         
         has_non_queued = False
-        for index in selected_indexes:
-            row = index.row()
+        for row in selected_rows:
             if 0 <= row < len(self.tasks):
                 if self.tasks[row]["status_item"].text() != "Queued":
                     has_non_queued = True
@@ -2119,40 +2859,30 @@ class MainWindow(FramelessWidget):
         
         menu.exec(self.tree_view.mapToGlobal(position))
 
-    def copy_description_to_selected(self, description):
-        selected_indexes = self.tree_view.selectionModel().selectedRows()
-        for index in selected_indexes:
-            row = index.row()
-            if 0 <= row < len(self.tasks):
-                self.tasks[row]["desc_item"].setText(description)
-                self.tasks[row]["desc_item"].setToolTip(description)
-                self.tasks[row]["description"] = description
-
     def copy_description(self):
-        selected_indexes = self.tree_view.selectionModel().selectedRows()
-        if len(selected_indexes) == 1:
-            row = selected_indexes[0].row()
+        selected_rows = self._get_selected_task_rows()
+        if len(selected_rows) == 1:
+            row = selected_rows[0]
             if 0 <= row < len(self.tasks):
                 self.clipboard_description = self.tasks[row]["description"]
-
+    
     def apply_copied_description(self):
         if not self.clipboard_description:
             return
         
-        selected_indexes = self.tree_view.selectionModel().selectedRows()
-        for index in selected_indexes:
-            row = index.row()
+        selected_rows = self._get_selected_task_rows()
+        for row in selected_rows:
             if 0 <= row < len(self.tasks):
                 self.tasks[row]["desc_item"].setText(self.clipboard_description)
                 self.tasks[row]["desc_item"].setToolTip(self.clipboard_description)
                 self.tasks[row]["description"] = self.clipboard_description
-
+    
     def edit_single_description(self):
-        selected_indexes = self.tree_view.selectionModel().selectedRows()
-        if len(selected_indexes) != 1:
+        selected_rows = self._get_selected_task_rows()
+        if len(selected_rows) != 1:
             return
         
-        row = selected_indexes[0].row()
+        row = selected_rows[0]
         if 0 <= row < len(self.tasks):
             current_desc = self.tasks[row]["description"]
             dialog = BulkDescriptionDialog(current_desc, self)
@@ -2162,21 +2892,20 @@ class MainWindow(FramelessWidget):
                 self.tasks[row]["desc_item"].setText(new_description)
                 self.tasks[row]["desc_item"].setToolTip(new_description)
                 self.tasks[row]["description"] = new_description
-
+    
     def bulk_edit_description(self):
-        selected_indexes = self.tree_view.selectionModel().selectedRows()
-        if not selected_indexes:
+        selected_rows = self._get_selected_task_rows()
+        if not selected_rows:
             return
         
         current_desc = ""
-        if len(selected_indexes) == 1:
-            row = selected_indexes[0].row()
+        if len(selected_rows) == 1:
+            row = selected_rows[0]
             if 0 <= row < len(self.tasks):
                 current_desc = self.tasks[row]["description"]
         else:
             descriptions = []
-            for index in selected_indexes:
-                row = index.row()
+            for row in selected_rows:
                 if 0 <= row < len(self.tasks):
                     desc = self.tasks[row]["description"]
                     if desc:
@@ -2188,8 +2917,7 @@ class MainWindow(FramelessWidget):
         dialog = BulkDescriptionDialog(current_desc, self)
         if dialog.exec():
             new_description = dialog.get_description()
-            for index in selected_indexes:
-                row = index.row()
+            for row in selected_rows:
                 if 0 <= row < len(self.tasks):
                     self.tasks[row]["desc_item"].setText(new_description)
                     self.tasks[row]["desc_item"].setToolTip(new_description)
@@ -2322,9 +3050,9 @@ class MainWindow(FramelessWidget):
             if 0 <= row < len(self.tasks):
                 task = self.tasks[row]
                 
-                self.queue_manager.remove_subtitle_from_queue(task["path"])
+                self._cleanup_task_audio_and_extracted_files(task["path"], "remove")
                 
-                self._cleanup_task_files(task)
+                self.queue_manager.remove_subtitle_from_queue(task["path"])
                 
                 self.tasks.pop(row)
                 self.model.removeRow(row)
@@ -2339,13 +3067,91 @@ class MainWindow(FramelessWidget):
         if not selected_indexes:
             return
         
+        selected_rows = self._get_selected_task_rows()
+        if not selected_rows:
+            return
+        
         reset_count = 0
-        for index in selected_indexes:
-            row = index.row()
+        for row in selected_rows:
             if 0 <= row < len(self.tasks):
-                current_status = self.tasks[row]["status_item"].text()
+                task = self.tasks[row]
+                task_path = task["path"]
+                current_status = task["status_item"].text()
+                
                 if current_status != "Queued":
-                    self.tasks[row]["status_item"].setText("Queued")
+                    task["status_item"].setText("Queued")
+                    
+                    if task_path in self.queue_manager.state["queue_state"]:
+                        languages = self.queue_manager.state["queue_state"][task_path].get("languages", {})
+                        for lang_code in languages.keys():
+                            self.queue_manager.mark_language_queued(task_path, lang_code)
+                    
+                    original_basename = os.path.basename(task_path)
+                    name_part, ext = os.path.splitext(original_basename)
+                    original_dir = os.path.dirname(task_path)
+                    
+                    for code in LANGUAGES.values():
+                        if name_part.endswith(f".{code}"):
+                            name_part = name_part[:-len(f".{code}")]
+                            break
+                    
+                    progress_file = os.path.join(original_dir, f"{name_part}.progress")
+                    if os.path.exists(progress_file):
+                        try:
+                            os.remove(progress_file)
+                        except Exception as e:
+                            pass
+                    
+                    pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+                    for lang_code in task["languages"]:
+                        file_lang_code = lang_code
+                        if file_lang_code.startswith('zh'):
+                            file_lang_code = 'zh'
+                        elif file_lang_code.startswith('pt'):
+                            file_lang_code = 'pt'
+                        
+                        output_filename = pattern.format(original_name=name_part, lang_code=file_lang_code)
+                        output_file = os.path.join(original_dir, output_filename)
+                        if os.path.exists(output_file):
+                            try:
+                                os.remove(output_file)
+                            except Exception as e:
+                                pass
+                    
+                    extracted_subtitle = self.queue_manager.get_extracted_subtitle_file(task_path)
+                    if extracted_subtitle and os.path.exists(extracted_subtitle):
+                        try:
+                            os.remove(extracted_subtitle)
+                        except Exception as e:
+                            pass
+                    
+                    should_cleanup_audio = self.settings.get("cleanup_audio_on_cancel", False)
+                    if should_cleanup_audio:
+                        audio_file = self.queue_manager.get_extracted_audio_file(task_path)
+                        if audio_file and os.path.exists(audio_file):
+                            try:
+                                os.remove(audio_file)
+                            except Exception as e:
+                                pass
+                        
+                        self.queue_manager.cleanup_extracted_audio(task_path)
+                    else:
+                        if task_path in self.queue_manager.state["queue_state"]:
+                            self.queue_manager.state["queue_state"][task_path]["extracted_subtitle_file"] = None
+                            self.queue_manager._save_queue_state()
+                    
+                    if task_path in self.queue_manager.state["queue_state"]:
+                        queue_entry = self.queue_manager.state["queue_state"][task_path]
+                        if queue_entry.get("requires_audio_extraction", False):
+                            if should_cleanup_audio:
+                                self.queue_manager.set_audio_extraction_status(task_path, "pending")
+                            else:
+                                audio_file = self.queue_manager.get_extracted_audio_file(task_path)
+                                if audio_file and os.path.exists(audio_file):
+                                    self.queue_manager.set_audio_extraction_status(task_path, "completed", audio_file)
+                                else:
+                                    self.queue_manager.set_audio_extraction_status(task_path, "pending")
+                    
                     reset_count += 1
         
         if reset_count > 0:
@@ -2383,35 +3189,22 @@ class MainWindow(FramelessWidget):
     def closeEvent(self, event):
         self._save_settings()
         if self.active_thread and self.active_thread.isRunning():
-            queue_on_exit = self.settings.get("queue_on_exit", "clear_if_translated")
-            
-            if queue_on_exit == "clear":
-                secondary_text = "Queue will stop gracefully but queue will be cleared on exit."
-            elif queue_on_exit == "clear_if_translated":
-                all_translated = True
-                for task in self.tasks:
-                    summary = self.queue_manager.get_language_progress_summary(task["path"])
-                    if summary != "Translated":
-                        all_translated = False
-                        break
-                
-                if all_translated:
-                    secondary_text = "Queue will stop gracefully and queue will be cleared on exit."
-                else:
-                    secondary_text = "Queue will stop gracefully and progress will be saved."
-            else:
-                secondary_text = "Queue will stop gracefully and progress will be saved."
+            current_task_name = ""
+            if 0 <= self.current_task_index < len(self.tasks):
+                task_path = self.tasks[self.current_task_index]["path"]
+                current_task_name = f"\n\nCurrent file: {os.path.basename(task_path)}"
             
             reply = CustomMessageBox.question(
                 self, 
                 'Confirm Exit', 
-                "Translation in progress. Stop and exit?",
+                f"Force cancel translation and exit?{current_task_name}",
                 QMessageBox.Yes | QMessageBox.No, 
                 QMessageBox.No,
-                secondary_text
+                "⚠️ WARNING: This will immediately stop translation and DELETE all progress files, output files, and extracted audio for the current task."
             )
             if reply == QMessageBox.Yes:
-                self.stop_translation_action()
+                if self.active_worker:
+                    self.active_worker.force_cancel()
                 
                 self._exit_timer = QTimer()
                 self._exit_timer.timeout.connect(lambda: self._check_translation_stopped(event))
@@ -2435,6 +3228,15 @@ class MainWindow(FramelessWidget):
         queue_on_exit = self.settings.get("queue_on_exit", "clear_if_translated")
         auto_resume = self.settings.get("auto_resume", True)
         
+        for task in self.tasks:
+            task_path = task["path"]
+            extracted_subtitle_file = self.queue_manager.get_extracted_subtitle_file(task_path)
+            if extracted_subtitle_file and os.path.exists(extracted_subtitle_file):
+                try:
+                    os.remove(extracted_subtitle_file)
+                except Exception as e:
+                    pass
+        
         if queue_on_exit == "clear":
             self._cleanup_all_task_files()
             self.queue_manager.clear_all_state()
@@ -2456,21 +3258,81 @@ class MainWindow(FramelessWidget):
                 self._cleanup_all_task_files()
 
     def add_files_action(self):
-        files, _ = QFileDialog.getOpenFileNames(self, "Select Subtitle Files", "", "SRT Files (*.srt);;All Files (*)")
+        files, _ = QFileDialog.getOpenFileNames(
+            self, 
+            "Select Subtitle or Video Files", 
+            "", 
+            "Media Files (*.srt *.mp4 *.mkv *.avi *.mov);;SRT Files (*.srt);;Video Files (*.mp4 *.mkv *.avi *.mov);;All Files (*)"
+        )
         if files:
-            for file_path in files:
-                if any(task['path'] == file_path and task['languages'] == self.selected_languages for task in self.tasks):
+            video_files = [f for f in files if is_video_file(f)]
+            subtitle_files = [f for f in files if is_subtitle_file(f)]
+            
+            processed_files = set()
+            tasks_to_add = []
+            
+            for subtitle_path in subtitle_files:
+                if subtitle_path in processed_files:
+                    continue
+                    
+                video_pair = None
+                for video_path in video_files:
+                    if video_path in processed_files:
+                        continue
+                        
+                    if self._files_are_pair(subtitle_path, video_path):
+                        video_pair = video_path
+                        break
+                
+                if video_pair:
+                    task_type = "video+subtitle"
+                    primary_file = subtitle_path
+                    
+                    processed_files.add(subtitle_path)
+                    processed_files.add(video_pair)
+                    
+                    tasks_to_add.append({
+                        'primary_file': primary_file,
+                        'video_file': video_pair,
+                        'task_type': task_type,
+                        'requires_extraction': True
+                    })
+                else:
+                    processed_files.add(subtitle_path)
+                    tasks_to_add.append({
+                        'primary_file': subtitle_path,
+                        'video_file': None,
+                        'task_type': 'subtitle',
+                        'requires_extraction': False
+                    })
+            
+            for video_path in video_files:
+                if video_path not in processed_files:
+                    tasks_to_add.append({
+                        'primary_file': video_path,
+                        'video_file': video_path,
+                        'task_type': 'video',
+                        'requires_extraction': False
+                    })
+            
+            for task_info in tasks_to_add:
+                primary_file = task_info['primary_file']
+                
+                if any(task['path'] == primary_file and task['languages'] == self.selected_languages for task in self.tasks):
                     continue
                 
                 self.queue_manager.add_subtitle_to_queue(
-                    file_path, 
+                    primary_file, 
                     self.selected_languages.copy(), 
                     "", 
-                    self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+                    self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt"),
+                    task_info['task_type'],
+                    task_info['video_file'],
+                    task_info['requires_extraction']
                 )
                 
-                self._add_task_to_ui(file_path, self.selected_languages.copy(), "")
-                
+                self._add_task_to_ui(primary_file, self.selected_languages.copy(), "", task_info['task_type'])
+            
             self.update_button_states()
 
     def start_translation_queue(self):
@@ -2536,8 +3398,10 @@ class MainWindow(FramelessWidget):
             model_name=self.model_name_edit.text().strip(), 
             settings=self.settings,
             description=task["description"],
-            queue_manager=self.queue_manager
+            queue_manager=self.queue_manager,
+            main_window=self
         )
+        
         self.active_thread = QThread(self)
         self.active_worker.moveToThread(self.active_thread)
         self.active_worker.status_message.connect(self.on_worker_status_message)
@@ -2551,6 +3415,14 @@ class MainWindow(FramelessWidget):
         self.update_button_states()
 
     def _find_and_process_next_queued_task(self):
+        if self.stop_after_current_task:
+            self.stop_after_current_task = False
+            self.is_running = False
+            self.overall_progress_bar.setFormat("Stopped")
+            self.overall_progress_bar.setValue(0)
+            self._handle_queue_finished()
+            return
+            
         for i, task in enumerate(self.tasks):
             next_lang = self.queue_manager.get_next_language_to_process(task["path"])
             if next_lang:
@@ -2562,6 +3434,7 @@ class MainWindow(FramelessWidget):
     def _handle_queue_finished(self):
         self.overall_progress_bar.setVisible(False)
         self.is_running = False
+        self.stop_after_current_task = False
         self.update_button_states()
         self.current_task_index = -1
         self._set_queue_items_editable(True)
@@ -2583,7 +3456,15 @@ class MainWindow(FramelessWidget):
     @Slot(int, str, bool)
     def on_worker_finished(self, task_idx, message, success):
         if 0 <= task_idx < len(self.tasks):
+            task_path = self.tasks[task_idx]["path"]
             self.tasks[task_idx]["status_item"].setText(message)
+            
+            self.queue_manager.sync_audio_extraction_status(task_path)
+            
+            if success:
+                self._cleanup_task_audio_and_extracted_files(task_path, "success")
+            else:
+                self._cleanup_task_audio_and_extracted_files(task_path, "failure")
             
         if self.active_thread and self.active_thread.isRunning():
             self.active_thread.quit()
@@ -2592,10 +3473,15 @@ class MainWindow(FramelessWidget):
         self.active_worker = None
         self.active_thread = None
         
-        if not success and "cancelled" in message.lower():
-            self.overall_progress_bar.setFormat("Stopped")
+        if self.stop_after_current_task:
+            self.stop_after_current_task = False
+            self.is_running = False
+            self.overall_progress_bar.setFormat("Stopped after task completion")
             self.overall_progress_bar.setValue(0)
-        elif not success:
+            QTimer.singleShot(500, self._handle_queue_finished)
+            return
+        
+        if not success:
             self.overall_progress_bar.setFormat("Error") 
             self.overall_progress_bar.setValue(0)
         else:
@@ -2609,25 +3495,21 @@ class MainWindow(FramelessWidget):
             
         self.update_button_states()
 
-    @Slot()
-    def stop_translation_action(self, force_quit=False):
-        if self.active_worker:
-            current_task_idx = self.current_task_index
-            if 0 <= current_task_idx < len(self.tasks):
-                current_task_path = self.tasks[current_task_idx]["path"]
-                current_lang = self.queue_manager.get_current_language_in_progress(current_task_path)
-                
-                self.active_worker.cancel()
-                self.tasks[current_task_idx]["status_item"].setText("Cancelling...")
-                
-                if current_lang:
-                    self.queue_manager.mark_language_queued(current_task_path, current_lang)
-        elif not force_quit:
+    def stop_translation_action(self):
+        if self.active_worker and self.is_running:
+            self.stop_after_current_task = True
+            self.start_stop_btn.setText("Finishing Current Task...")
+            self.start_stop_btn.setEnabled(True)
+            
+            if 0 <= self.current_task_index < len(self.tasks):
+                current_status = self.tasks[self.current_task_index]["status_item"].text()
+                if not current_status.startswith("Finishing"):
+                    self.tasks[self.current_task_index]["status_item"].setText(f"Finishing - {current_status}")
+            
+        elif not self.is_running:
             CustomMessageBox.information(self, "Stop", "No active translation to stop.")
-        
-        self.is_running = False
-        self.update_button_states()
-        self._set_queue_items_editable(True)
+            self.update_button_states()
+            self._set_queue_items_editable(True)
     
     @Slot()
     def clear_queue_action(self):
@@ -2662,8 +3544,11 @@ class MainWindow(FramelessWidget):
         has_any_tasks = len(self.tasks) > 0
         api_key_valid = len(self.api_key_edit.text().strip()) >= 12
         
-        if self.is_running or is_processing:
-            self.start_stop_btn.setText("Stop Translating")
+        if self.stop_after_current_task and is_processing:
+            self.start_stop_btn.setText("Force Cancel Current Task")
+            self.start_stop_btn.setEnabled(True)
+        elif self.is_running or is_processing:
+            self.start_stop_btn.setText("Stop After Current Task")
             self.start_stop_btn.setEnabled(True)
         else:
             if not api_key_valid:
@@ -2673,9 +3558,11 @@ class MainWindow(FramelessWidget):
                 self.start_stop_btn.setText("Start Translating")
                 self.start_stop_btn.setEnabled(has_work_remaining)
         
-        self.clear_btn.setEnabled(has_any_tasks and not is_processing and not self.is_running)
-        self.custom_title_bar.language_selection_btn.setEnabled(not is_processing and not self.is_running)
-        self.custom_title_bar.settings_btn.setEnabled(not is_processing and not self.is_running)
+        is_busy = is_processing or self.is_running
+        
+        self.clear_btn.setEnabled(has_any_tasks and not is_busy)
+        self.custom_title_bar.language_selection_btn.setEnabled(not is_busy)
+        self.custom_title_bar.settings_btn.setEnabled(not is_busy)
         
     def _get_language_names_from_codes(self, lang_codes):
         unique_codes = list(dict.fromkeys(lang_codes))
@@ -2696,22 +3583,21 @@ class MainWindow(FramelessWidget):
         return names
         
     def edit_selected_languages(self):
-        selected_indexes = self.tree_view.selectionModel().selectedRows()
-        if not selected_indexes:
+        selected_rows = self._get_selected_task_rows()
+        if not selected_rows:
             return
         
         current_languages = self.selected_languages.copy()
         
-        if len(selected_indexes) == 1:
-            row = selected_indexes[0].row()
+        if len(selected_rows) == 1:
+            row = selected_rows[0]
             if 0 <= row < len(self.tasks):
                 current_languages = self.tasks[row]["languages"].copy()
-        elif len(selected_indexes) > 1:
+        elif len(selected_rows) > 1:
             first_languages = None
             all_same = True
             
-            for index in selected_indexes:
-                row = index.row()
+            for row in selected_rows:
                 if 0 <= row < len(self.tasks):
                     task_languages = self.tasks[row]["languages"]
                     if first_languages is None:
@@ -2734,8 +3620,7 @@ class MainWindow(FramelessWidget):
             new_lang_display = self._get_language_display_text(new_languages)
             new_lang_tooltip = self._format_language_tooltip(new_languages)
             
-            for index in selected_indexes:
-                row = index.row()
+            for row in selected_rows:
                 if 0 <= row < len(self.tasks):
                     self.tasks[row]["languages"] = new_languages.copy()
                     self.tasks[row]["lang_item"].setText(new_lang_display)
@@ -2754,6 +3639,141 @@ class MainWindow(FramelessWidget):
             if task.get("desc_item"):
                 task["desc_item"].setEditable(is_editable)
         self.model.blockSignals(False)
+    
+    def _find_video_pair(self, subtitle_path):
+        base_dir = os.path.dirname(subtitle_path)
+        subtitle_name = os.path.basename(subtitle_path)
+        name_part = os.path.splitext(subtitle_name)[0]
+        
+        for code in LANGUAGES.values():
+            if name_part.endswith(f".{code}"):
+                name_part = name_part[:-len(f".{code}")]
+                break
+        
+        for ext in VIDEO_EXTENSIONS:
+            video_path = os.path.join(base_dir, name_part + ext)
+            if os.path.exists(video_path):
+                return video_path
+        return None
+    
+    def _find_subtitle_pair(self, video_path):
+        base_dir = os.path.dirname(video_path)
+        video_name = os.path.basename(video_path)
+        name_part = os.path.splitext(video_name)[0]
+        
+        subtitle_path = os.path.join(base_dir, name_part + ".srt")
+        if os.path.exists(subtitle_path):
+            return subtitle_path
+        
+        for code in LANGUAGES.values():
+            subtitle_path = os.path.join(base_dir, f"{name_part}.{code}.srt")
+            if os.path.exists(subtitle_path):
+                return subtitle_path
+        
+        return None
+        
+    def _should_cleanup_audio(self, scenario):
+        scenario_map = {
+            "success": "cleanup_audio_on_success",
+            "failure": "cleanup_audio_on_failure", 
+            "cancel": "cleanup_audio_on_cancel",
+            "remove": "cleanup_audio_on_remove",
+            "exit": "cleanup_audio_on_exit"
+        }
+        
+        setting_key = scenario_map.get(scenario)
+        if not setting_key:
+            return False
+            
+        should_cleanup = self.settings.get(setting_key, False)
+        
+        if scenario == "exit" and should_cleanup:
+            queue_setting = self.settings.get("queue_on_exit", "clear_if_translated")
+            if queue_setting == "clear":
+                return True
+            elif queue_setting == "clear_if_translated":
+                all_translated = all(self.queue_manager.get_language_progress_summary(task["path"]) == "Translated" 
+                          for task in self.tasks)
+                return all_translated
+            elif queue_setting == "keep":
+                return False
+        
+        return should_cleanup
+                    
+    def _get_selected_task_rows(self):
+        selected_indexes = self.tree_view.selectionModel().selectedRows()
+        task_rows = []
+        
+        for index in selected_indexes:
+            if not index.parent().isValid():
+                task_rows.append(index.row())
+        
+        return task_rows
+        
+    def _files_are_pair(self, subtitle_path, video_path):
+        subtitle_dir = os.path.dirname(subtitle_path)
+        video_dir = os.path.dirname(video_path)
+        
+        if subtitle_dir != video_dir:
+            return False
+        
+        subtitle_name = os.path.basename(subtitle_path)
+        video_name = os.path.basename(video_path)
+        
+        subtitle_base = os.path.splitext(subtitle_name)[0]
+        video_base = os.path.splitext(video_name)[0]
+        
+        for code in LANGUAGES.values():
+            if subtitle_base.endswith(f".{code}"):
+                subtitle_base = subtitle_base[:-len(f".{code}")]
+                break
+        
+        return subtitle_base == video_base
+        
+    def _cleanup_task_audio_and_extracted_files(self, task_path, scenario="success"):
+        files_to_delete = set()
+
+        state_managed_subtitle = self.queue_manager.get_extracted_subtitle_file(task_path)
+        if state_managed_subtitle:
+            files_to_delete.add(state_managed_subtitle)
+
+        queue_entry = self.queue_manager.state["queue_state"].get(task_path, {})
+        source_file_for_naming = queue_entry.get("video_file") or task_path
+        
+        base_dir = os.path.dirname(source_file_for_naming)
+        file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
+
+        for code in LANGUAGES.values():
+            if file_name_without_ext.endswith(f".{code}"):
+                file_name_without_ext = file_name_without_ext[:-len(f".{code}")]
+                break
+        
+        predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
+        files_to_delete.add(predicted_subtitle_path)
+
+        for file_path in files_to_delete:
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    pass
+
+        should_cleanup_audio = self._should_cleanup_audio(scenario)
+        
+        if should_cleanup_audio:
+            audio_file, _ = self.queue_manager.sync_audio_extraction_status(task_path)
+            
+            if audio_file and os.path.exists(audio_file):
+                try:
+                    os.remove(audio_file)
+                except Exception as e:
+                    pass
+            
+            self.queue_manager.cleanup_extracted_audio(task_path)
+        else:
+            if task_path in self.queue_manager.state["queue_state"]:
+                self.queue_manager.state["queue_state"][task_path]["extracted_subtitle_file"] = None
+                self.queue_manager._save_queue_state()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
