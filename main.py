@@ -124,6 +124,7 @@ DEFAULT_SETTINGS = {
     "output_file_naming_pattern": "{original_name}.{lang_code}.srt",
     "update_existing_queue_languages": False,
     "queue_on_exit": "clear_if_translated",
+    "existing_file_handling": "skip",
     "use_gst_parameters": False,
     "use_model_tuning": False,
     "description": "", 
@@ -551,6 +552,12 @@ class QueueStateManager:
                 return expected_audio, expected_subtitle if subtitle_exists else current_extracted_subtitle
         
         return current_audio_file, current_extracted_subtitle
+        
+    def mark_language_skipped(self, subtitle_path, lang_code):
+        if subtitle_path in self.state["queue_state"]:
+            if lang_code in self.state["queue_state"][subtitle_path]["languages"]:
+                self.state["queue_state"][subtitle_path]["languages"][lang_code]["status"] = "skipped"
+                self._save_queue_state()
 
 class DialogTitleBarWidget(QWidget):
     def __init__(self, title="Dialog", parent=None):
@@ -1020,6 +1027,18 @@ class SettingsDialog(CustomFramelessDialog):
         
         form_layout.addRow("Queue on Exit:", self.queue_on_exit_combo)
         
+        self.existing_file_combo = QComboBox()
+        self.existing_file_combo.addItem("Skip Existing Files", "skip")
+        self.existing_file_combo.addItem("Overwrite Always (Skips if same as input)", "overwrite")
+        
+        current_setting = self.settings.get("existing_file_handling", "skip")
+        for i in range(self.existing_file_combo.count()):
+            if self.existing_file_combo.itemData(i) == current_setting:
+                self.existing_file_combo.setCurrentIndex(i)
+                break
+        
+        form_layout.addRow("Existing Output Files:", self.existing_file_combo)
+        
         main_layout.addLayout(form_layout)
         
         self.auto_resume_checkbox = QCheckBox("Resume Stopped Translations")
@@ -1215,6 +1234,7 @@ class SettingsDialog(CustomFramelessDialog):
     def reset_defaults(self):
         self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
         self.queue_on_exit_combo.setCurrentIndex(1)
+        self.existing_file_combo.setCurrentIndex(0)
         self.auto_resume_checkbox.setChecked(True)
         self.update_queue_languages_checkbox.setChecked(True)
         
@@ -1264,6 +1284,7 @@ class SettingsDialog(CustomFramelessDialog):
         
         s["output_file_naming_pattern"] = self.output_naming_pattern_edit.text().strip()
         s["queue_on_exit"] = self.queue_on_exit_combo.currentData()
+        s["existing_file_handling"] = self.existing_file_combo.currentData()
         s["auto_resume"] = self.auto_resume_checkbox.isChecked()
         s["update_existing_queue_languages"] = self.update_queue_languages_checkbox.isChecked()
         
@@ -1998,6 +2019,23 @@ class TranslationWorker(QObject):
             self.finished.emit(self.task_index, "Translation failed", False)
             
     def _handle_video_subtitle_workflow(self):
+        languages_needing_work = []
+        for lang_code in self.target_languages:
+            should_skip, skip_reason = self._should_skip_language(lang_code)
+            if not should_skip:
+                languages_needing_work.append(lang_code)
+            else:
+                if skip_reason == "same_as_input":
+                    self.status_message.emit(self.task_index, f"Skipped {self._get_language_name(lang_code)} - same as input file")
+                elif skip_reason == "exists":
+                    self.status_message.emit(self.task_index, f"Skipped {self._get_language_name(lang_code)} - file already exists")
+                
+                self.queue_manager.mark_language_completed(self.input_file_path, lang_code)
+                self.language_completed.emit(self.task_index, lang_code, True)
+        
+        if not languages_needing_work:
+            return True
+        
         if self.queue_manager.should_extract_audio(self.input_file_path):
             success = self._extract_audio_pass()
             if not success or self._should_force_cancel():
@@ -2022,6 +2060,18 @@ class TranslationWorker(QObject):
         for lang_code in self.target_languages:
             if self._should_force_cancel():
                 return False
+            
+            should_skip, skip_reason = self._should_skip_language(lang_code)
+            if should_skip:
+                if skip_reason == "same_as_input":
+                    self.status_message.emit(self.task_index, f"Skipped {self._get_language_name(lang_code)} - same as input file")
+                elif skip_reason == "exists":
+                    self.status_message.emit(self.task_index, f"Skipped {self._get_language_name(lang_code)} - file already exists")
+                
+                self.queue_manager.mark_language_completed(self.input_file_path, lang_code)
+                completed_count += 1
+                self.language_completed.emit(self.task_index, lang_code, True)
+                continue
             
             if self._should_stop_gracefully() and completed_count > 0:
                 break
@@ -2078,6 +2128,18 @@ class TranslationWorker(QObject):
             if not next_lang:
                 break
             
+            should_skip, skip_reason = self._should_skip_language(next_lang)
+            if should_skip:
+                if skip_reason == "same_as_input":
+                    self.status_message.emit(self.task_index, f"Skipped {self._get_language_name(next_lang)} - same as input file")
+                elif skip_reason == "exists":
+                    self.status_message.emit(self.task_index, f"Skipped {self._get_language_name(next_lang)} - file already exists")
+                
+                self.queue_manager.mark_language_completed(self.input_file_path, next_lang)
+                self.language_completed.emit(self.task_index, next_lang, True)
+                completed_count += 1
+                continue
+            
             if self._should_stop_gracefully() and completed_count > 0:
                 break
             
@@ -2131,6 +2193,19 @@ class TranslationWorker(QObject):
             return True
         else:
             return completed_count > 0
+            
+    def _should_skip_language(self, lang_code):
+        output_path = self._generate_output_filename(lang_code)
+        
+        if os.path.normpath(self.input_file_path) == os.path.normpath(output_path):
+            return True, "same_as_input"
+        
+        if os.path.exists(output_path):
+            handling = self.settings.get("existing_file_handling", "skip")
+            if handling == "skip":
+                return True, "exists"
+        
+        return False, None
     
     def force_cancel(self):
         self.force_cancelled = True
