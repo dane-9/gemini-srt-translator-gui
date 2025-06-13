@@ -2422,8 +2422,8 @@ class MainWindow(FramelessWidget):
             column=2,  # Type column
             text_pattern="Video",
             icon_path=get_resource_path("Files/video-warning.svg"),
-            color="#FFA500",
-            size=14,
+            color="#F5E456",
+            size=12,
             position="after",
             spacing=1
         )
