@@ -133,7 +133,6 @@ DEFAULT_SETTINGS = {
     "skip_upgrade": False, 
     "progress_log": False, 
     "thoughts_log": False,
-    "auto_resume": True,
     "temperature": 0.7, 
     "top_p": 0.95, 
     "top_k": 40, 
@@ -1041,11 +1040,6 @@ class SettingsDialog(CustomFramelessDialog):
         
         main_layout.addLayout(form_layout)
         
-        self.auto_resume_checkbox = QCheckBox("Resume Stopped Translations")
-        self.auto_resume_checkbox.setChecked(self.settings.get("auto_resume", True))
-        self.auto_resume_checkbox.setToolTip("Resumes stopped translations from where they left off")
-        main_layout.addWidget(self.auto_resume_checkbox)
-        
         self.update_queue_languages_checkbox = QCheckBox("Auto-Update Queue Languages")
         self.update_queue_languages_checkbox.setChecked(self.settings.get("update_existing_queue_languages", True))
         self.update_queue_languages_checkbox.setToolTip("When enabled, changing the language selection will update all existing queue items that match the previous selection")
@@ -1235,7 +1229,6 @@ class SettingsDialog(CustomFramelessDialog):
         self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
         self.queue_on_exit_combo.setCurrentIndex(1)
         self.existing_file_combo.setCurrentIndex(0)
-        self.auto_resume_checkbox.setChecked(True)
         self.update_queue_languages_checkbox.setChecked(False)
         
         self.gst_checkbox.setChecked(False)
@@ -1285,7 +1278,6 @@ class SettingsDialog(CustomFramelessDialog):
         s["output_file_naming_pattern"] = self.output_naming_pattern_edit.text().strip()
         s["queue_on_exit"] = self.queue_on_exit_combo.currentData()
         s["existing_file_handling"] = self.existing_file_combo.currentData()
-        s["auto_resume"] = self.auto_resume_checkbox.isChecked()
         s["update_existing_queue_languages"] = self.update_queue_languages_checkbox.isChecked()
         
         s["use_gst_parameters"] = self.gst_checkbox.isChecked()
@@ -1710,11 +1702,7 @@ class TranslationWorker(QObject):
             cmd.extend(["-a", extracted_audio])
         
         progress_line, progress_lang = self._detect_progress_file()
-        auto_resume_enabled = self.settings.get("auto_resume", True)
-        
-        if auto_resume_enabled and progress_line is not None and progress_lang == target_language and progress_line >= 5:
-            cmd.append("--resume")
-        elif progress_line is not None:
+        if progress_line is not None:
             self._cleanup_for_fresh_start(target_language)
         
         if self.settings.get("use_gst_parameters", False):
@@ -2149,17 +2137,7 @@ class TranslationWorker(QObject):
             try:
                 self.queue_manager.mark_language_in_progress(self.input_file_path, next_lang)
                 
-                progress_line, progress_lang = self._detect_progress_file()
-                if (progress_line and progress_lang == next_lang and 
-                    self.settings.get("auto_resume", True) and progress_line >= 5):
-                    self.status_message.emit(self.task_index, f"Resuming {lang_name} from line {progress_line}")
-                else:
-                    if progress_line and progress_line < 5:
-                        self.status_message.emit(self.task_index, f"Starting over for {lang_name}")
-                    elif progress_line and progress_lang != next_lang:
-                        self.status_message.emit(self.task_index, f"Starting over for {lang_name}")
-                    else:
-                        self.status_message.emit(self.task_index, f"Translating to {lang_name}...")
+                self.status_message.emit(self.task_index, f"Translating to {lang_name}...")
                 
                 cmd = self._build_cli_command(next_lang)
                 
@@ -3407,7 +3385,6 @@ class MainWindow(FramelessWidget):
     
     def _perform_exit(self):
         queue_on_exit = self.settings.get("queue_on_exit", "clear_if_translated")
-        auto_resume = self.settings.get("auto_resume", True)
         
         for task in self.tasks:
             task_path = task["path"]
@@ -3432,11 +3409,6 @@ class MainWindow(FramelessWidget):
             if all_translated:
                 self._cleanup_all_task_files()
                 self.queue_manager.clear_all_state()
-            elif not auto_resume:
-                self._cleanup_all_task_files()
-        elif queue_on_exit == "keep":
-            if not auto_resume:
-                self._cleanup_all_task_files()
 
     def add_files_action(self):
         files, _ = QFileDialog.getOpenFileNames(
