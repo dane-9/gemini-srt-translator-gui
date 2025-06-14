@@ -2108,8 +2108,27 @@ class TranslationWorker(QObject):
                 
                 output_filename = _clean_filename_dots(output_filename)
                 output_file = os.path.join(original_dir, output_filename)
-                if os.path.exists(output_file):
-                    os.remove(output_file)
+                
+                if not os.path.exists(output_file):
+                    continue
+                    
+                if os.path.normpath(self.input_file_path) == os.path.normpath(output_file):
+                    continue
+                
+                input_parsed = _parse_subtitle_filename(os.path.basename(self.input_file_path))
+                output_parsed = _parse_subtitle_filename(os.path.basename(output_file))
+                
+                if (input_parsed and output_parsed and 
+                    input_parsed['base_name'] == output_parsed['base_name'] and
+                    input_parsed['modifiers_string'] == output_parsed['modifiers_string']):
+                    
+                    input_lang_normalized = _normalize_language_code(input_parsed['lang_code']) if input_parsed['lang_code'] else None
+                    output_lang_normalized = _normalize_language_code(output_parsed['lang_code']) if output_parsed['lang_code'] else None
+                    
+                    if input_lang_normalized == output_lang_normalized == lang_code:
+                        continue
+                
+                os.remove(output_file)
     
             if self.queue_manager:
                 files_to_delete = set()
