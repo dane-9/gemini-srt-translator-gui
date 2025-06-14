@@ -2806,7 +2806,7 @@ class MainWindow(FramelessWidget):
         self.add_btn.clicked.connect(self.add_files_action)
         button_layout.addWidget(self.add_btn)
         
-        self.start_stop_btn = QPushButton("Start Translations")
+        self.start_stop_btn = QPushButton("Start Translating")
         self.start_stop_btn.setObjectName("ControlButton")
         
         button_font = self.start_stop_btn.font()
@@ -2995,7 +2995,7 @@ class MainWindow(FramelessWidget):
                 
                 reply = CustomMessageBox.question(
                     self, 
-                    'Force Cancel & Reset', 
+                    'Force Cancel Current Language', 
                     f'Force cancel the current translation?\n\nFile: {current_task_name}',
                     QMessageBox.Yes | QMessageBox.No, 
                     QMessageBox.No,
@@ -3011,11 +3011,8 @@ class MainWindow(FramelessWidget):
     def force_stop_translation(self):
         if self.active_worker and self.is_running:
             self.stop_after_current_task = True
-            self.start_stop_btn.setText("Force Cancelling & Resetting...")
+            self.start_stop_btn.setText("Cancelling...")
             self.start_stop_btn.setEnabled(False)
-            
-            if 0 <= self.current_task_index < len(self.tasks):
-                self.tasks[self.current_task_index]["status_item"].setText("Force cancelling & resetting...")
             
             self.active_worker.force_cancel()
 
@@ -3858,7 +3855,7 @@ class MainWindow(FramelessWidget):
     def stop_translation_action(self):
         if self.active_worker and self.is_running:
             self.stop_after_current_task = True
-            self.start_stop_btn.setText("Finishing Current Task...")
+            self.start_stop_btn.setText("Finishing Current Translation...")
             self.start_stop_btn.setEnabled(True)
             
         elif not self.is_running:
