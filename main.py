@@ -3863,11 +3863,6 @@ class MainWindow(FramelessWidget):
             self.start_stop_btn.setText("Finishing Current Task...")
             self.start_stop_btn.setEnabled(True)
             
-            if 0 <= self.current_task_index < len(self.tasks):
-                current_status = self.tasks[self.current_task_index]["status_item"].text()
-                if not current_status.startswith("Finishing"):
-                    self.tasks[self.current_task_index]["status_item"].setText(f"Finishing - {current_status}")
-            
         elif not self.is_running:
             CustomMessageBox.information(self, "Stop", "No active translation to stop.")
             self.update_button_states()
