@@ -1624,7 +1624,7 @@ class TranslationWorker(QObject):
                 self.status_message.emit(self.task_index, "Video file not found")
                 return False
             
-            self.status_message.emit(self.task_index, "Extracting audio from video...")
+            self.status_message.emit(self.task_index, "Extracting Audio")
             self.queue_manager.set_audio_extraction_status(self.input_file_path, "extracting")
             
             cmd = ["gst", "translate", "-v", video_file, "-k", self.api_key, "--extract-audio", "--no-colors"]
@@ -1667,7 +1667,7 @@ class TranslationWorker(QObject):
                         except:
                             pass
                     self.process = None
-                    self._cleanup_all_task_files()
+                    self._cleanup_current_language_only()
                     return False
                 
                 poll_result = self.process.poll()
@@ -1681,16 +1681,17 @@ class TranslationWorker(QObject):
                         clean_line = re.sub(r'\x1b\[[0-9;]*m', '', line.strip())
                         
                         if "Starting audio extraction and processing" in clean_line:
-                            self.status_message.emit(self.task_index, "Processing audio...")
+                            self.progress_update.emit(self.task_index, 10, "Starting audio extraction...")
                         elif "Compressing extracted audio" in clean_line:
-                            self.status_message.emit(self.task_index, "Compressing audio...")
+                            self.progress_update.emit(self.task_index, 70, "Compressing to MP3...")
                         elif "Success! Audio saved as:" in clean_line:
                             if ":" in clean_line:
                                 extracted_audio_file = clean_line.split("Success! Audio saved as:")[-1].strip()
+                            self.progress_update.emit(self.task_index, 90, "Audio extraction completed")
                         elif "Final file size:" in clean_line:
                             pass
                         elif "Extracting subtitles from video file" in clean_line:
-                            self.status_message.emit(self.task_index, "Extracting subtitles...")
+                            self.progress_update.emit(self.task_index, 50, "Extracting subtitle track...")
                         elif "Success! Subtitles saved as:" in clean_line:
                             if ":" in clean_line:
                                 extracted_subtitle_file = clean_line.split("Success! Subtitles saved as:")[-1].strip()
@@ -1766,7 +1767,7 @@ class TranslationWorker(QObject):
             self.process = None
     
             if self._should_force_cancel():
-                self._cleanup_all_task_files()
+                self._cleanup_current_language_only()
                 return False
     
             video_basename = os.path.basename(video_file)
@@ -1822,7 +1823,7 @@ class TranslationWorker(QObject):
     
         except Exception:
             if self._should_force_cancel():
-                self._cleanup_all_task_files()
+                self._cleanup_current_language_only()
             self.queue_manager.set_audio_extraction_status(self.input_file_path, "failed")
             return False
         
@@ -1938,6 +1939,13 @@ class TranslationWorker(QObject):
     def _execute_translation_command(self, cmd, lang_code, completed_count, total_languages):
         lang_name = self._get_language_name(lang_code)
         
+        if total_languages > 1:
+            simple_status = f"Translating {lang_name} {completed_count + 1}/{total_languages}"
+        else:
+            simple_status = f"Translating {lang_name}"
+        
+        self.status_message.emit(self.task_index, simple_status)
+        
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
@@ -1998,17 +2006,9 @@ class TranslationWorker(QObject):
                 details = progress_match.group(2)
                 state = progress_match.group(3)
                 
-                overall_progress = int((completed_count / total_languages) * 100 + (lang_percent / total_languages))
-    
-                action_str = f"{details} | {state}..."
+                progress_bar_text = f"{lang_percent}% - {details} | {state}..."
                 
-                if total_languages > 1:
-                    overall_progress_str = f"[{completed_count + 1}/{total_languages}]"
-                    status_text = f"{overall_progress_str} Translating {lang_name}: {action_str}"
-                else:
-                    status_text = f"Translating {lang_name}: {action_str}"
-                
-                self.progress_update.emit(self.task_index, overall_progress, status_text)
+                self.progress_update.emit(self.task_index, lang_percent, progress_bar_text)
                 continue
     
             elif "Translation completed successfully!" in line:
@@ -3745,10 +3745,10 @@ class MainWindow(FramelessWidget):
             return
             
         self.current_task_index = task_idx
-        task["status_item"].setText("Preparing...")
+        task["status_item"].setText("Preparing")
         self.overall_progress_bar.setVisible(True)
         self.overall_progress_bar.setValue(0)
-        self.overall_progress_bar.setFormat("%p% - Current Task")
+        self.overall_progress_bar.setFormat("Starting...")
         self.is_running = True
         
         self.active_worker = TranslationWorker(
@@ -3809,11 +3809,11 @@ class MainWindow(FramelessWidget):
                 self.tasks[task_idx]["status_item"].setText(message)
 
     @Slot(int, int, str)
-    def on_worker_progress_update(self, task_idx, percentage, status_text):
+    def on_worker_progress_update(self, task_idx, percentage, progress_text):
         if 0 <= task_idx < len(self.tasks):
-            if self.current_task_index == task_idx :
-                self.tasks[task_idx]["status_item"].setText(status_text)
+            if self.current_task_index == task_idx:
                 self.overall_progress_bar.setValue(percentage)
+                self.overall_progress_bar.setFormat(progress_text)
 
     @Slot(int, str, bool)
     def on_worker_finished(self, task_idx, message, success):
