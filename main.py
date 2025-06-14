@@ -2048,8 +2048,8 @@ class TranslationWorker(QObject):
         return return_code == 0 and found_completion
     
     def _get_language_name(self, lang_code):
-        for name, code in LANGUAGES.items():
-            if code == lang_code:
+        for name, (two_letter, three_letter) in LANGUAGES.items():
+            if two_letter == lang_code:
                 return name
         return lang_code.upper()
     
