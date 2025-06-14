@@ -1984,15 +1984,6 @@ class TranslationWorker(QObject):
                         self._send_interrupt_signal()
                         break
     
-            if self._should_stop_gracefully() and not is_video_command:
-                if "Translating:" in line:
-                    progress_match = re.search(r"(\d+)%", line)
-                    if progress_match:
-                        percent = int(progress_match.group(1))
-                        if percent > 10 and percent % 10 == 0:
-                            self._send_interrupt_signal()
-                            break
-    
             if "Resuming from line" in line:
                 resume_match = re.search(r"Resuming from line (\d+)", line)
                 if resume_match:
@@ -2041,9 +2032,6 @@ class TranslationWorker(QObject):
         if self._should_force_cancel():
             self._cleanup_all_task_files()
             return False
-        
-        if self._should_stop_gracefully():
-            return return_code == 0 or found_completion
     
         return return_code == 0 and found_completion
     
