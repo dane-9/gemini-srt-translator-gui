@@ -4029,6 +4029,71 @@ class MainWindow(FramelessWidget):
             if task_path in self.queue_manager.state["queue_state"]:
                 self.queue_manager.state["queue_state"][task_path]["extracted_subtitle_file"] = None
                 self.queue_manager._save_queue_state()
+                
+    def _cleanup_all_task_files(self):
+        for task in self.tasks:
+            task_path = task["path"]
+            
+            try:
+                original_basename = os.path.basename(task_path)
+                original_dir = os.path.dirname(task_path)
+                
+                subtitle_parsed = _parse_subtitle_filename(original_basename)
+                if subtitle_parsed and subtitle_parsed['base_name']:
+                    name_part = subtitle_parsed['base_name']
+                else:
+                    name_part = _strip_language_codes_from_name(os.path.splitext(original_basename)[0])
+                
+                progress_file = os.path.join(original_dir, f"{name_part}.progress")
+                if os.path.exists(progress_file):
+                    os.remove(progress_file)
+                
+                pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.{modifiers}.srt")
+                
+                for lang_code in task["languages"]:
+                    file_lang_code = lang_code
+                    if file_lang_code.startswith('zh'):
+                        file_lang_code = 'zh'
+                    elif file_lang_code.startswith('pt'):
+                        file_lang_code = 'pt'
+                    
+                    modifiers = _build_modifiers_string(subtitle_parsed)
+                    
+                    output_filename = pattern.format(
+                        original_name=name_part, 
+                        lang_code=file_lang_code,
+                        modifiers=modifiers
+                    )
+                    
+                    output_filename = _clean_filename_dots(output_filename)
+                    output_file = os.path.join(original_dir, output_filename)
+                    
+                    if not os.path.exists(output_file):
+                        continue
+                        
+                    if os.path.normpath(task_path) == os.path.normpath(output_file):
+                        continue
+                    
+                    input_parsed = _parse_subtitle_filename(os.path.basename(task_path))
+                    output_parsed = _parse_subtitle_filename(os.path.basename(output_file))
+                    
+                    if (input_parsed and output_parsed and 
+                        input_parsed['base_name'] == output_parsed['base_name'] and
+                        input_parsed['modifiers_string'] == output_parsed['modifiers_string']):
+                        
+                        input_lang_normalized = _normalize_language_code(input_parsed['lang_code']) if input_parsed['lang_code'] else None
+                        output_lang_normalized = _normalize_language_code(output_parsed['lang_code']) if output_parsed['lang_code'] else None
+                        
+                        if input_lang_normalized == output_lang_normalized == lang_code:
+                            continue
+                    
+                    os.remove(output_file)
+                
+                self._cleanup_task_audio_and_extracted_files(task_path, "exit")
+                        
+            except Exception as e:
+                print(f"Error cleaning up files for task {task_path}: {e}")
+                continue
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
