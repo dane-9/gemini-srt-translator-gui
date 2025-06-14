@@ -3374,32 +3374,7 @@ class MainWindow(FramelessWidget):
                             os.remove(progress_file)
                         except Exception as e:
                             pass
-                    
-                    pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.{modifiers}.srt")
-                    
-                    for lang_code in task["languages"]:
-                        file_lang_code = lang_code
-                        if file_lang_code.startswith('zh'):
-                            file_lang_code = 'zh'
-                        elif file_lang_code.startswith('pt'):
-                            file_lang_code = 'pt'
-                        
-                        modifiers = _build_modifiers_string(subtitle_parsed)
-                        
-                        output_filename = pattern.format(
-                            original_name=name_part, 
-                            lang_code=file_lang_code,
-                            modifiers=modifiers
-                        )
-                        
-                        output_filename = _clean_filename_dots(output_filename)
-                        output_file = os.path.join(original_dir, output_filename)
-                        if os.path.exists(output_file):
-                            try:
-                                os.remove(output_file)
-                            except Exception as e:
-                                pass
-                    
+                            
                     extracted_subtitle = self.queue_manager.get_extracted_subtitle_file(task_path)
                     if extracted_subtitle and os.path.exists(extracted_subtitle):
                         try:
