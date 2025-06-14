@@ -2189,10 +2189,11 @@ class TranslationWorker(QObject):
             self._cleanup_all_task_files()
             self.finished.emit(self.task_index, "Force Cancelled & Reset", False)
         elif self._should_stop_gracefully():
-            if success:
-                self.finished.emit(self.task_index, "Completed (Queue Stopping)", True)
+            progress_summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
+            if progress_summary == "Translated":
+                self.finished.emit(self.task_index, "Translated", True)
             else:
-                self.finished.emit(self.task_index, "Failed (Queue Stopping)", False)
+                self.finished.emit(self.task_index, progress_summary, success)
         elif success:
             self.finished.emit(self.task_index, "Translated", True)
         else:
