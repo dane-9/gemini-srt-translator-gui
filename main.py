@@ -121,7 +121,7 @@ DEFAULT_SETTINGS = {
     "target_language": "English",
     "selected_languages": ["en"],
     "model_name": "gemini-2.5-flash-preview-05-20",
-    "output_file_naming_pattern": "{original_name}.{lang_code}.srt",
+    "output_file_naming_pattern": "{original_name}.{lang_code}.{modifiers}.srt",
     "update_existing_queue_languages": False,
     "queue_on_exit": "clear_if_translated",
     "existing_file_handling": "skip",
@@ -147,31 +147,152 @@ DEFAULT_SETTINGS = {
 }
 
 LANGUAGES = {
-    "Afrikaans": "af", "Albanian": "sq", "Amharic": "am", "Arabic": "ar",
-    "Armenian": "hy", "Azerbaijani": "az", "Basque": "eu", "Belarusian": "be",
-    "Bengali": "bn", "Bosnian": "bs", "Bulgarian": "bg", "Catalan": "ca",
-    "Cebuano": "ceb", "Chinese (Simplified)": "zh-CN", "Chinese (Traditional)": "zh-TW",
-    "Corsican": "co", "Croatian": "hr", "Czech": "cs", "Danish": "da",
-    "Dutch": "nl", "English": "en", "Estonian": "et", "Finnish": "fi",
-    "French": "fr", "Frisian": "fy", "Galician": "gl", "Georgian": "ka",
-    "German": "de", "Greek": "el", "Gujarati": "gu", "Haitian Creole": "ht",
-    "Hausa": "ha", "Hebrew": "he", "Hindi": "hi", "Hungarian": "hu",
-    "Icelandic": "is", "Igbo": "ig", "Indonesian": "id", "Italian": "it",
-    "Japanese": "ja", "Javanese": "jv", "Kannada": "kn", "Kazakh": "kk",
-    "Khmer": "km", "Korean": "ko", "Kurdish": "ku", "Kyrgyz": "ky",
-    "Lao": "lo", "Latvian": "lv", "Lithuanian": "lt", "Luxembourgish": "lb",
-    "Macedonian": "mk", "Malay": "ms", "Malayalam": "ml", "Maltese": "mt",
-    "Marathi": "mr", "Mongolian": "mn", "Myanmar": "my", "Nepali": "ne",
-    "Norwegian": "no", "Pashto": "ps", "Persian": "fa", "Polish": "pl",
-    "Brazilian Portuguese": "pt-BR", "Portuguese": "pt-PT", "Punjabi": "pa",
-    "Romanian": "ro", "Russian": "ru", "Samoan": "sm", "Serbian": "sr",
-    "Sindhi": "sd", "Sinhala": "si", "Slovak": "sk", "Slovenian": "sl",
-    "Somali": "so", "Spanish": "es", "Sundanese": "su", "Swahili": "sw",
-    "Swedish": "sv", "Tajik": "tg", "Tamil": "ta", "Telugu": "te",
-    "Thai": "th", "Turkish": "tr", "Ukrainian": "uk", "Urdu": "ur",
-    "Uzbek": "uz", "Vietnamese": "vi", "Xhosa": "xh", "Yiddish": "yi",
-    "Yoruba": "yo", "Zulu": "zu"
+    "Afrikaans": ("af", "afr"), "Albanian": ("sq", "sqi"), "Amharic": ("am", "amh"), "Arabic": ("ar", "ara"),
+    "Armenian": ("hy", "hye"), "Azerbaijani": ("az", "aze"), "Basque": ("eu", "eus"), "Belarusian": ("be", "bel"),
+    "Bengali": ("bn", "ben"), "Bosnian": ("bs", "bos"), "Bulgarian": ("bg", "bul"), "Catalan": ("ca", "cat"),
+    "Cebuano": ("ceb", "ceb"), "Chinese (Simplified)": ("zh-CN", "zho"), "Chinese (Traditional)": ("zh-TW", "zho"),
+    "Corsican": ("co", "cos"), "Croatian": ("hr", "hrv"), "Czech": ("cs", "ces"), "Danish": ("da", "dan"),
+    "Dutch": ("nl", "nld"), "English": ("en", "eng"), "Estonian": ("et", "est"), "Finnish": ("fi", "fin"),
+    "French": ("fr", "fra"), "Frisian": ("fy", "fry"), "Galician": ("gl", "glg"), "Georgian": ("ka", "kat"),
+    "German": ("de", "deu"), "Greek": ("el", "ell"), "Gujarati": ("gu", "guj"), "Haitian Creole": ("ht", "hat"),
+    "Hausa": ("ha", "hau"), "Hebrew": ("he", "heb"), "Hindi": ("hi", "hin"), "Hungarian": ("hu", "hun"),
+    "Icelandic": ("is", "isl"), "Igbo": ("ig", "ibo"), "Indonesian": ("id", "ind"), "Italian": ("it", "ita"),
+    "Japanese": ("ja", "jpn"), "Javanese": ("jv", "jav"), "Kannada": ("kn", "kan"), "Kazakh": ("kk", "kaz"),
+    "Khmer": ("km", "khm"), "Korean": ("ko", "kor"), "Kurdish": ("ku", "kur"), "Kyrgyz": ("ky", "kir"),
+    "Lao": ("lo", "lao"), "Latvian": ("lv", "lav"), "Lithuanian": ("lt", "lit"), "Luxembourgish": ("lb", "ltz"),
+    "Macedonian": ("mk", "mkd"), "Malay": ("ms", "msa"), "Malayalam": ("ml", "mal"), "Maltese": ("mt", "mlt"),
+    "Marathi": ("mr", "mar"), "Mongolian": ("mn", "mon"), "Myanmar": ("my", "mya"), "Nepali": ("ne", "nep"),
+    "Norwegian": ("no", "nor"), "Pashto": ("ps", "pus"), "Persian": ("fa", "fas"), "Polish": ("pl", "pol"),
+    "Brazilian Portuguese": ("pt-BR", "por"), "Portuguese": ("pt-PT", "por"), "Punjabi": ("pa", "pan"),
+    "Romanian": ("ro", "ron"), "Russian": ("ru", "rus"), "Samoan": ("sm", "smo"), "Serbian": ("sr", "srp"),
+    "Sindhi": ("sd", "snd"), "Sinhala": ("si", "sin"), "Slovak": ("sk", "slk"), "Slovenian": ("sl", "slv"),
+    "Somali": ("so", "som"), "Spanish": ("es", "spa"), "Sundanese": ("su", "sun"), "Swahili": ("sw", "swa"),
+    "Swedish": ("sv", "swe"), "Tajik": ("tg", "tgk"), "Tamil": ("ta", "tam"), "Telugu": ("te", "tel"),
+    "Thai": ("th", "tha"), "Turkish": ("tr", "tur"), "Ukrainian": ("uk", "ukr"), "Urdu": ("ur", "urd"),
+    "Uzbek": ("uz", "uzb"), "Vietnamese": ("vi", "vie"), "Xhosa": ("xh", "xho"), "Yiddish": ("yi", "yid"),
+    "Yoruba": ("yo", "yor"), "Zulu": ("zu", "zul")
 }
+
+def _build_language_code_maps():
+    two_letter_to_standard = {}
+    three_letter_to_standard = {}
+    
+    for lang_name, (two_letter, three_letter) in LANGUAGES.items():
+        two_letter_to_standard[two_letter] = two_letter
+        three_letter_to_standard[three_letter] = two_letter
+    
+    return two_letter_to_standard, three_letter_to_standard
+    
+def _normalize_language_code(code):
+    two_letter_map, three_letter_map = _build_language_code_maps()
+    
+    if code in two_letter_map:
+        return two_letter_map[code]
+    elif code in three_letter_map:
+        return three_letter_map[code]
+    
+    return None
+    
+def _parse_subtitle_filename(subtitle_filename):
+    if not subtitle_filename.lower().endswith('.srt'):
+        return None
+    
+    basename = os.path.splitext(subtitle_filename)[0]
+    parts = basename.split('.')
+    
+    if len(parts) < 2:
+        return {
+            'base_name': basename,
+            'lang_code': None,
+            'forced': False,
+            'sdh': False,
+            'modifiers_string': '',
+            'original_parts': parts
+        }
+    
+    result = {
+        'base_name': None,
+        'lang_code': None,
+        'forced': False,
+        'sdh': False,
+        'modifiers_string': '',
+        'original_parts': parts
+    }
+    
+    lang_code = None
+    lang_part_index = -1
+    
+    for i in range(len(parts) - 1, 0, -1):
+        part = parts[i].lower()
+        
+        if part in ['forced', 'sdh']:
+            continue
+        
+        normalized_code = _normalize_language_code(part)
+        if normalized_code and lang_code is None:
+            lang_code = normalized_code
+            lang_part_index = i
+            break
+    
+    if lang_part_index > 0:
+        result['base_name'] = '.'.join(parts[:lang_part_index])
+        
+        modifier_parts = parts[lang_part_index + 1:]
+        valid_modifiers = []
+        
+        for modifier_part in modifier_parts:
+            modifier_lower = modifier_part.lower()
+            if modifier_lower in ['forced', 'sdh']:
+                valid_modifiers.append(modifier_lower)
+                if modifier_lower == 'forced':
+                    result['forced'] = True
+                elif modifier_lower == 'sdh':
+                    result['sdh'] = True
+        
+        result['modifiers_string'] = '.'.join(valid_modifiers)
+    else:
+        result['base_name'] = basename
+    
+    result['lang_code'] = lang_code
+    
+    return result
+    
+def _get_all_language_codes():
+    codes = []
+    for two_letter, three_letter in LANGUAGES.values():
+        codes.append(two_letter)
+        if three_letter != two_letter:
+            codes.append(three_letter)
+    return codes
+    
+def _strip_language_codes_from_name(name_part):
+    parts = name_part.split('.')
+    if len(parts) < 2:
+        return name_part
+    
+    all_codes = _get_all_language_codes()
+    modifiers = ['forced', 'sdh']
+    
+    while len(parts) > 1:
+        last_part = parts[-1].lower()
+        
+        if last_part in modifiers or _normalize_language_code(last_part):
+            parts.pop()
+        else:
+            break
+    
+    return '.'.join(parts)
+    
+def _build_modifiers_string(subtitle_parsed):
+    if not subtitle_parsed:
+        return ""
+    
+    return subtitle_parsed.get('modifiers_string', '')
+    
+def _clean_filename_dots(filename):
+    while '..' in filename:
+        filename = filename.replace('..', '.')
+    return filename
 
 class IconTextDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
@@ -304,16 +425,30 @@ class QueueStateManager:
         
         subtitle_dir = os.path.dirname(subtitle_path)
         subtitle_basename = os.path.basename(subtitle_path)
-        name_part, ext = os.path.splitext(subtitle_basename)
         
-        for code in LANGUAGES.values():
-            if name_part.endswith(f".{code}"):
-                name_part = name_part[:-len(f".{code}")]
-                break
+        subtitle_parsed = _parse_subtitle_filename(subtitle_basename)
+        if subtitle_parsed and subtitle_parsed['base_name']:
+            name_part = subtitle_parsed['base_name']
+        else:
+            name_part = _strip_language_codes_from_name(os.path.splitext(subtitle_basename)[0])
         
         for lang_code in languages:
             if lang_code not in self.state["queue_state"][subtitle_path]["languages"]:
-                output_filename = output_pattern.format(original_name=name_part, lang_code=lang_code)
+                file_lang_code = lang_code
+                if file_lang_code.startswith('zh'):
+                    file_lang_code = 'zh'
+                elif file_lang_code.startswith('pt'):
+                    file_lang_code = 'pt'
+                
+                modifiers = _build_modifiers_string(subtitle_parsed)
+                
+                output_filename = output_pattern.format(
+                    original_name=name_part, 
+                    lang_code=file_lang_code,
+                    modifiers=modifiers
+                )
+                
+                output_filename = _clean_filename_dots(output_filename)
                 output_path = os.path.join(subtitle_dir, output_filename)
                 
                 self.state["queue_state"][subtitle_path]["languages"][lang_code] = {
@@ -445,15 +580,29 @@ class QueueStateManager:
             
             subtitle_dir = os.path.dirname(subtitle_path)
             subtitle_basename = os.path.basename(subtitle_path)
-            name_part, ext = os.path.splitext(subtitle_basename)
             
-            for code in LANGUAGES.values():
-                if name_part.endswith(f".{code}"):
-                    name_part = name_part[:-len(f".{code}")]
-                    break
+            subtitle_parsed = _parse_subtitle_filename(subtitle_basename)
+            if subtitle_parsed and subtitle_parsed['base_name']:
+                name_part = subtitle_parsed['base_name']
+            else:
+                name_part = _strip_language_codes_from_name(os.path.splitext(subtitle_basename)[0])
             
             for lang_code in new_languages:
-                output_filename = output_pattern.format(original_name=name_part, lang_code=lang_code)
+                file_lang_code = lang_code
+                if file_lang_code.startswith('zh'):
+                    file_lang_code = 'zh'
+                elif file_lang_code.startswith('pt'):
+                    file_lang_code = 'pt'
+                
+                modifiers = _build_modifiers_string(subtitle_parsed)
+                
+                output_filename = output_pattern.format(
+                    original_name=name_part, 
+                    lang_code=file_lang_code,
+                    modifiers=modifiers
+                )
+                
+                output_filename = _clean_filename_dots(output_filename)
                 output_path = os.path.join(subtitle_dir, output_filename)
                 
                 old_status = "queued"
@@ -1336,12 +1485,12 @@ class LanguageSelectionDialog(CustomFramelessDialog):
     def populate_languages(self):
         sorted_languages = sorted(LANGUAGES.items())
         
-        for lang_name, lang_code in sorted_languages:
+        for lang_name, (two_letter, three_letter) in sorted_languages:
             item = QListWidgetItem()
             
-            checkbox = QCheckBox(f"{lang_name} ({lang_code})")
-            checkbox.setChecked(lang_code in self.selected_languages)
-            checkbox.setProperty("lang_code", lang_code)
+            checkbox = QCheckBox(f"{lang_name} ({two_letter})")
+            checkbox.setChecked(two_letter in self.selected_languages)
+            checkbox.setProperty("lang_code", two_letter)
             
             item.setSizeHint(checkbox.sizeHint())
             self.language_list.addItem(item)
@@ -1412,21 +1561,31 @@ class TranslationWorker(QObject):
     
     def _generate_output_filename(self, lang_code):
         original_basename = os.path.basename(self.input_file_path)
-        name_part, ext = os.path.splitext(original_basename)
-        pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
-
+        subtitle_parsed = _parse_subtitle_filename(original_basename)
+        
+        if subtitle_parsed and subtitle_parsed['base_name']:
+            name_part = subtitle_parsed['base_name']
+        else:
+            name_part = _strip_language_codes_from_name(os.path.splitext(original_basename)[0])
+        
+        pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.{modifiers}.srt")
+    
         file_lang_code = lang_code
         if file_lang_code.startswith('zh'):
             file_lang_code = 'zh'
         elif file_lang_code.startswith('pt'):
             file_lang_code = 'pt'
-    
-        for code in LANGUAGES.values():
-            if name_part.endswith(f".{code}"):
-                name_part = name_part[:-len(f".{code}")]
-                break
         
-        final_name = pattern.format(original_name=name_part, lang_code=file_lang_code)
+        modifiers = _build_modifiers_string(subtitle_parsed)
+        
+        final_name = pattern.format(
+            original_name=name_part, 
+            lang_code=file_lang_code,
+            modifiers=modifiers
+        )
+        
+        final_name = _clean_filename_dots(final_name)
+        
         original_dir = os.path.dirname(self.input_file_path)
         return os.path.join(original_dir, final_name)
     
@@ -1922,15 +2081,16 @@ class TranslationWorker(QObject):
                 os.remove(progress_file)
             
             original_basename = os.path.basename(self.input_file_path)
-            name_part, ext = os.path.splitext(original_basename)
             original_dir = os.path.dirname(self.input_file_path)
             
-            for code in LANGUAGES.values():
-                if name_part.endswith(f".{code}"):
-                    name_part = name_part[:-len(f".{code}")]
-                    break
+            subtitle_parsed = _parse_subtitle_filename(original_basename)
+            if subtitle_parsed and subtitle_parsed['base_name']:
+                name_part = subtitle_parsed['base_name']
+            else:
+                name_part = _strip_language_codes_from_name(os.path.splitext(original_basename)[0])
             
-            pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+            pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.{modifiers}.srt")
+            
             for lang_code in self.target_languages:
                 file_lang_code = lang_code
                 if file_lang_code.startswith('zh'):
@@ -1938,15 +2098,40 @@ class TranslationWorker(QObject):
                 elif file_lang_code.startswith('pt'):
                     file_lang_code = 'pt'
                 
-                output_filename = pattern.format(original_name=name_part, lang_code=file_lang_code)
+                modifiers = _build_modifiers_string(subtitle_parsed)
+                
+                output_filename = pattern.format(
+                    original_name=name_part, 
+                    lang_code=file_lang_code,
+                    modifiers=modifiers
+                )
+                
+                output_filename = _clean_filename_dots(output_filename)
                 output_file = os.path.join(original_dir, output_filename)
                 if os.path.exists(output_file):
                     os.remove(output_file)
-            
+    
             if self.queue_manager:
-                extracted_subtitle = self.queue_manager.get_extracted_subtitle_file(self.input_file_path)
-                if extracted_subtitle and os.path.exists(extracted_subtitle):
-                    os.remove(extracted_subtitle)
+                files_to_delete = set()
+                
+                state_managed_subtitle = self.queue_manager.get_extracted_subtitle_file(self.input_file_path)
+                if state_managed_subtitle:
+                    files_to_delete.add(state_managed_subtitle)
+    
+                queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
+                source_file_for_naming = queue_entry.get("video_file") or self.input_file_path
+                
+                base_dir = os.path.dirname(source_file_for_naming)
+                file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
+                
+                file_name_without_ext = _strip_language_codes_from_name(file_name_without_ext)
+    
+                predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
+                files_to_delete.add(predicted_subtitle_path)
+    
+                for file_path in files_to_delete:
+                    if file_path and os.path.exists(file_path):
+                        os.remove(file_path)
                 
                 should_cleanup_audio = self.settings.get("cleanup_audio_on_cancel", False)
                 
@@ -1970,7 +2155,7 @@ class TranslationWorker(QObject):
                         self.queue_manager.set_audio_extraction_status(self.input_file_path, "pending")
             
         except Exception as e:
-            print(f"Error during force cancel cleanup: {e}")
+            pass
                 
     def run(self):
         if self._should_force_cancel():
@@ -2818,77 +3003,6 @@ class MainWindow(FramelessWidget):
             displayed = ", ".join(language_names[:max_display])
             remaining = len(language_names) - max_display
             return f"{displayed} and {remaining} more..."
-    
-    def _cleanup_all_task_files(self):
-        try:
-            progress_file = self._get_progress_file_path()
-            if os.path.exists(progress_file):
-                os.remove(progress_file)
-            
-            original_basename = os.path.basename(self.input_file_path)
-            name_part, ext = os.path.splitext(original_basename)
-            original_dir = os.path.dirname(self.input_file_path)
-            
-            for code in LANGUAGES.values():
-                if name_part.endswith(f".{code}"):
-                    name_part = name_part[:-len(f".{code}")]
-                    break
-            
-            pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
-            for lang_code in self.target_languages:
-                output_filename = pattern.format(original_name=name_part, lang_code=lang_code.replace('-', '_'))
-                output_file = os.path.join(original_dir, output_filename)
-                if os.path.exists(output_file):
-                    os.remove(output_file)
-
-            if self.queue_manager:
-                files_to_delete = set()
-                
-                state_managed_subtitle = self.queue_manager.get_extracted_subtitle_file(self.input_file_path)
-                if state_managed_subtitle:
-                    files_to_delete.add(state_managed_subtitle)
-
-                queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
-                source_file_for_naming = queue_entry.get("video_file") or self.input_file_path
-                
-                base_dir = os.path.dirname(source_file_for_naming)
-                file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
-                
-                for code in LANGUAGES.values():
-                    if file_name_without_ext.endswith(f".{code}"):
-                        file_name_without_ext = file_name_without_ext[:-len(f".{code}")]
-                        break
-
-                predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
-                files_to_delete.add(predicted_subtitle_path)
-
-                for file_path in files_to_delete:
-                    if file_path and os.path.exists(file_path):
-                        os.remove(file_path)
-                
-                should_cleanup_audio = self.settings.get("cleanup_audio_on_cancel", False)
-                
-                if should_cleanup_audio:
-                    audio_file = self.queue_manager.get_extracted_audio_file(self.input_file_path)
-                    if audio_file and os.path.exists(audio_file):
-                        os.remove(audio_file)
-                    
-                    self.queue_manager.cleanup_extracted_audio(self.input_file_path)
-                else:
-                    if self.input_file_path in self.queue_manager.state["queue_state"]:
-                        self.queue_manager.state["queue_state"][self.input_file_path]["extracted_subtitle_file"] = None
-                        self.queue_manager._save_queue_state()
-                
-                for lang_code in self.target_languages:
-                    self.queue_manager.mark_language_queued(self.input_file_path, lang_code)
-                
-                if should_cleanup_audio:
-                    queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
-                    if queue_entry.get("requires_audio_extraction", False):
-                        self.queue_manager.set_audio_extraction_status(self.input_file_path, "pending")
-            
-        except Exception as e:
-            pass
                 
     def open_language_selection(self):
         dialog = LanguageSelectionDialog(self.selected_languages, self)
@@ -3246,13 +3360,13 @@ class MainWindow(FramelessWidget):
                             self.queue_manager.mark_language_queued(task_path, lang_code)
                     
                     original_basename = os.path.basename(task_path)
-                    name_part, ext = os.path.splitext(original_basename)
                     original_dir = os.path.dirname(task_path)
                     
-                    for code in LANGUAGES.values():
-                        if name_part.endswith(f".{code}"):
-                            name_part = name_part[:-len(f".{code}")]
-                            break
+                    subtitle_parsed = _parse_subtitle_filename(original_basename)
+                    if subtitle_parsed and subtitle_parsed['base_name']:
+                        name_part = subtitle_parsed['base_name']
+                    else:
+                        name_part = _strip_language_codes_from_name(os.path.splitext(original_basename)[0])
                     
                     progress_file = os.path.join(original_dir, f"{name_part}.progress")
                     if os.path.exists(progress_file):
@@ -3261,7 +3375,8 @@ class MainWindow(FramelessWidget):
                         except Exception as e:
                             pass
                     
-                    pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+                    pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.{modifiers}.srt")
+                    
                     for lang_code in task["languages"]:
                         file_lang_code = lang_code
                         if file_lang_code.startswith('zh'):
@@ -3269,7 +3384,15 @@ class MainWindow(FramelessWidget):
                         elif file_lang_code.startswith('pt'):
                             file_lang_code = 'pt'
                         
-                        output_filename = pattern.format(original_name=name_part, lang_code=file_lang_code)
+                        modifiers = _build_modifiers_string(subtitle_parsed)
+                        
+                        output_filename = pattern.format(
+                            original_name=name_part, 
+                            lang_code=file_lang_code,
+                            modifiers=modifiers
+                        )
+                        
+                        output_filename = _clean_filename_dots(output_filename)
                         output_file = os.path.join(original_dir, output_filename)
                         if os.path.exists(output_file):
                             try:
@@ -3721,16 +3844,14 @@ class MainWindow(FramelessWidget):
         unique_codes = list(dict.fromkeys(lang_codes))
         names = []
         for code in unique_codes:
-            found_names = []
-            for name, lang_code in LANGUAGES.items():
-                if lang_code == code:
-                    found_names.append(name)
+            found_name = None
+            for name, (two_letter, three_letter) in LANGUAGES.items():
+                if two_letter == code:
+                    found_name = name
+                    break
             
-            if found_names:
-                if len(found_names) == 1:
-                    names.append(found_names[0])
-                else:
-                    names.extend(found_names)
+            if found_name:
+                names.append(found_name)
             else:
                 names.append(code.upper())
         return names
@@ -3794,32 +3915,42 @@ class MainWindow(FramelessWidget):
         self.model.blockSignals(False)
     
     def _find_video_pair(self, subtitle_path):
-        base_dir = os.path.dirname(subtitle_path)
-        subtitle_name = os.path.basename(subtitle_path)
-        name_part = os.path.splitext(subtitle_name)[0]
+        subtitle_info = _parse_subtitle_filename(os.path.basename(subtitle_path))
+        if not subtitle_info:
+            return None
         
-        for code in LANGUAGES.values():
-            if name_part.endswith(f".{code}"):
-                name_part = name_part[:-len(f".{code}")]
-                break
+        base_dir = os.path.dirname(subtitle_path)
+        base_name = subtitle_info['base_name']
         
         for ext in VIDEO_EXTENSIONS:
-            video_path = os.path.join(base_dir, name_part + ext)
+            video_path = os.path.join(base_dir, base_name + ext)
             if os.path.exists(video_path):
                 return video_path
+        
         return None
     
     def _find_subtitle_pair(self, video_path):
         base_dir = os.path.dirname(video_path)
         video_name = os.path.basename(video_path)
-        name_part = os.path.splitext(video_name)[0]
+        video_base = os.path.splitext(video_name)[0]
         
-        subtitle_path = os.path.join(base_dir, name_part + ".srt")
+        subtitle_path = os.path.join(base_dir, video_base + ".srt")
         if os.path.exists(subtitle_path):
             return subtitle_path
         
-        for code in LANGUAGES.values():
-            subtitle_path = os.path.join(base_dir, f"{name_part}.{code}.srt")
+        all_codes = _get_all_language_codes()
+        
+        for code in all_codes:
+            subtitle_path = os.path.join(base_dir, f"{video_base}.{code}.srt")
+            if os.path.exists(subtitle_path):
+                return subtitle_path
+            
+            for modifier in ['forced', 'sdh']:
+                subtitle_path = os.path.join(base_dir, f"{video_base}.{code}.{modifier}.srt")
+                if os.path.exists(subtitle_path):
+                    return subtitle_path
+            
+            subtitle_path = os.path.join(base_dir, f"{video_base}.{code}.forced.sdh.srt")
             if os.path.exists(subtitle_path):
                 return subtitle_path
         
@@ -3870,18 +4001,14 @@ class MainWindow(FramelessWidget):
         if subtitle_dir != video_dir:
             return False
         
-        subtitle_name = os.path.basename(subtitle_path)
-        video_name = os.path.basename(video_path)
+        subtitle_info = _parse_subtitle_filename(os.path.basename(subtitle_path))
+        if not subtitle_info:
+            return False
         
-        subtitle_base = os.path.splitext(subtitle_name)[0]
+        video_name = os.path.basename(video_path)
         video_base = os.path.splitext(video_name)[0]
         
-        for code in LANGUAGES.values():
-            if subtitle_base.endswith(f".{code}"):
-                subtitle_base = subtitle_base[:-len(f".{code}")]
-                break
-        
-        return subtitle_base == video_base
+        return subtitle_info['base_name'] == video_base
         
     def _cleanup_task_audio_and_extracted_files(self, task_path, scenario="success"):
         files_to_delete = set()
