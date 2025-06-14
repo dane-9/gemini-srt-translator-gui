@@ -2030,7 +2030,7 @@ class TranslationWorker(QObject):
         self.pending_force_cancellation = False
     
         if self._should_force_cancel():
-            self._cleanup_all_task_files()
+            self._cleanup_current_language_only()
             return False
     
         return return_code == 0 and found_completion
@@ -2166,8 +2166,9 @@ class TranslationWorker(QObject):
                 
     def run(self):
         if self._should_force_cancel():
-            self._cleanup_all_task_files()
-            self.finished.emit(self.task_index, "Force Cancelled", False)
+            self._cleanup_current_language_only()
+            progress_summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
+            self.finished.emit(self.task_index, progress_summary, False)
             return
     
         if not self.queue_manager:
@@ -2186,8 +2187,9 @@ class TranslationWorker(QObject):
             success = self._handle_subtitle_only_workflow()
         
         if self._should_force_cancel():
-            self._cleanup_all_task_files()
-            self.finished.emit(self.task_index, "Force Cancelled & Reset", False)
+            self._cleanup_current_language_only()
+            progress_summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
+            self.finished.emit(self.task_index, progress_summary, False)
         elif self._should_stop_gracefully():
             progress_summary = self.queue_manager.get_language_progress_summary(self.input_file_path)
             if progress_summary == "Translated":
@@ -2377,6 +2379,107 @@ class TranslationWorker(QObject):
                 return True, "exists"
         
         return False, None
+        
+    def _cleanup_current_language_only(self):
+        try:
+            progress_file = self._get_progress_file_path()
+            if os.path.exists(progress_file):
+                os.remove(progress_file)
+
+            if self.current_language:
+                original_basename = os.path.basename(self.input_file_path)
+                original_dir = os.path.dirname(self.input_file_path)
+                
+                subtitle_parsed = _parse_subtitle_filename(original_basename)
+                if subtitle_parsed and subtitle_parsed['base_name']:
+                    name_part = subtitle_parsed['base_name']
+                else:
+                    name_part = _strip_language_codes_from_name(os.path.splitext(original_basename)[0])
+                
+                pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.{modifiers}.srt")
+                
+                file_lang_code = self.current_language
+                if file_lang_code.startswith('zh'):
+                    file_lang_code = 'zh'
+                elif file_lang_code.startswith('pt'):
+                    file_lang_code = 'pt'
+                
+                modifiers = _build_modifiers_string(subtitle_parsed)
+                
+                output_filename = pattern.format(
+                    original_name=name_part, 
+                    lang_code=file_lang_code,
+                    modifiers=modifiers
+                )
+                
+                output_filename = _clean_filename_dots(output_filename)
+                output_file = os.path.join(original_dir, output_filename)
+
+                if (os.path.exists(output_file) and 
+                    os.path.normpath(self.input_file_path) != os.path.normpath(output_file)):
+                    
+                    input_parsed = _parse_subtitle_filename(os.path.basename(self.input_file_path))
+                    output_parsed = _parse_subtitle_filename(os.path.basename(output_file))
+                    
+                    safe_to_delete = True
+                    if (input_parsed and output_parsed and 
+                        input_parsed['base_name'] == output_parsed['base_name'] and
+                        input_parsed['modifiers_string'] == output_parsed['modifiers_string']):
+                        
+                        input_lang_normalized = _normalize_language_code(input_parsed['lang_code']) if input_parsed['lang_code'] else None
+                        output_lang_normalized = _normalize_language_code(output_parsed['lang_code']) if output_parsed['lang_code'] else None
+                        
+                        if input_lang_normalized == output_lang_normalized == self.current_language:
+                            safe_to_delete = False
+                    
+                    if safe_to_delete:
+                        os.remove(output_file)
+                
+                if self.queue_manager:
+                    self.queue_manager.mark_language_queued(self.input_file_path, self.current_language)
+            
+            if self.queue_manager:
+                files_to_delete = set()
+                
+                state_managed_subtitle = self.queue_manager.get_extracted_subtitle_file(self.input_file_path)
+                if state_managed_subtitle:
+                    files_to_delete.add(state_managed_subtitle)
+    
+                queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
+                source_file_for_naming = queue_entry.get("video_file") or self.input_file_path
+                
+                base_dir = os.path.dirname(source_file_for_naming)
+                file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
+                
+                file_name_without_ext = _strip_language_codes_from_name(file_name_without_ext)
+    
+                predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
+                files_to_delete.add(predicted_subtitle_path)
+    
+                for file_path in files_to_delete:
+                    if file_path and os.path.exists(file_path):
+                        os.remove(file_path)
+                
+                should_cleanup_audio = self.settings.get("cleanup_audio_on_cancel", False)
+                
+                if should_cleanup_audio:
+                    audio_file = self.queue_manager.get_extracted_audio_file(self.input_file_path)
+                    if audio_file and os.path.exists(audio_file):
+                        os.remove(audio_file)
+                    
+                    self.queue_manager.cleanup_extracted_audio(self.input_file_path)
+                else:
+                    if self.input_file_path in self.queue_manager.state["queue_state"]:
+                        self.queue_manager.state["queue_state"][self.input_file_path]["extracted_subtitle_file"] = None
+                        self.queue_manager._save_queue_state()
+                
+                if should_cleanup_audio:
+                    queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
+                    if queue_entry.get("requires_audio_extraction", False):
+                        self.queue_manager.set_audio_extraction_status(self.input_file_path, "pending")
+                
+        except Exception as e:
+            pass
     
     def force_cancel(self):
         self.force_cancelled = True
