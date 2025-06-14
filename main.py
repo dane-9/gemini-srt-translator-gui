@@ -2695,6 +2695,11 @@ class MainWindow(FramelessWidget):
         self.stop_after_current_task = False
         self._exit_timer = None
         
+        self.api_key1_validated = False
+        self.api_key2_validated = False
+        self.last_validated_key1 = ""
+        self.last_validated_key2 = ""
+        
         title_bar = self.getTitleBar()
         title_bar.setTitleBarFont(QFont('Arial', 12))
         title_bar.setIconSize(24, 24)
@@ -2727,7 +2732,7 @@ class MainWindow(FramelessWidget):
         self.api_key_edit.set_right_text("API Key 1", font_size=9, italic=False, color="#555555")
         self.api_key_edit.setEchoMode(QLineEdit.Password)
         self.api_key_edit.setText(self.settings.get("gemini_api_key", ""))
-        self.api_key_edit.textChanged.connect(lambda text: (self.settings.update({"gemini_api_key": text}), self.update_button_states()))
+        self.api_key_edit.textChanged.connect(self.on_api_key1_changed)
         api_keys_model_layout.addWidget(self.api_key_edit)
         
         self.api_key2_edit = CustomLineEdit()
@@ -2735,7 +2740,7 @@ class MainWindow(FramelessWidget):
         self.api_key2_edit.set_right_text("API Key 2", font_size=9, italic=False, color="#555555")
         self.api_key2_edit.setEchoMode(QLineEdit.Password)
         self.api_key2_edit.setText(self.settings.get("gemini_api_key2", ""))
-        self.api_key2_edit.textChanged.connect(lambda text: self.settings.update({"gemini_api_key2": text}))
+        self.api_key2_edit.textChanged.connect(self.on_api_key2_changed)
         api_keys_model_layout.addWidget(self.api_key2_edit)
         
         self.model_name_edit = CustomLineEdit()
@@ -3695,11 +3700,25 @@ class MainWindow(FramelessWidget):
             self.update_button_states()
 
     def start_translation_queue(self):
-        if len(self.api_key_edit.text().strip()) < 12:
-            CustomMessageBox.warning(self, "API Key Invalid", "Please enter a valid Gemini API Key.")
+        key_status = self.validate_both_api_keys()
+        
+        if not key_status['key1_provided']:
+            CustomMessageBox.warning(self, "API Key Missing", "Please enter a primary Gemini API Key.")
             self.api_key_edit.setFocus()
             return
-            
+        
+        if not key_status['key1_valid']:
+            CustomMessageBox.warning(self, "Invalid Primary API Key", 
+                                   "The primary API key is invalid. Please verify your key.")
+            self.api_key_edit.setFocus()
+            return
+        
+        if key_status['key2_provided'] and not key_status['key2_valid']:
+            CustomMessageBox.warning(self, "Invalid Secondary API Key", 
+                                   "The secondary API key is invalid. Please verify your key.")
+            self.api_key2_edit.setFocus()
+            return
+                
         if self.active_thread and self.active_thread.isRunning():
             CustomMessageBox.information(self, "In Progress", "A translation is already in progress.")
             return
@@ -3728,7 +3747,7 @@ class MainWindow(FramelessWidget):
         self.current_task_index = first_task_with_work
         self._process_task_at_index(self.current_task_index)
         self.update_button_states()
-
+    
     def _process_task_at_index(self, task_idx):
         if not (0 <= task_idx < len(self.tasks)):
             self._handle_queue_finished()
@@ -3894,17 +3913,24 @@ class MainWindow(FramelessWidget):
         has_work_remaining = self.queue_manager.has_any_work_remaining()
         is_processing = self.active_thread is not None and self.active_thread.isRunning()
         has_any_tasks = len(self.tasks) > 0
-        api_key_valid = len(self.api_key_edit.text().strip()) >= 12
+        
+        key_status = self.validate_both_api_keys()
         
         if self.stop_after_current_task and is_processing:
             self.start_stop_btn.setText("Force Cancel Current Language")
             self.start_stop_btn.setEnabled(True)
         elif self.is_running or is_processing:
-            self.start_stop_btn.setText("Stop After Current Language")
+            self.start_stop_btn.setText("Stop After Current Language")  
             self.start_stop_btn.setEnabled(True)
         else:
-            if not api_key_valid:
-                self.start_stop_btn.setText("Missing API Key")
+            if not key_status['key1_provided']:
+                self.start_stop_btn.setText("Missing Primary API Key")
+                self.start_stop_btn.setEnabled(False)
+            elif not key_status['key1_valid']:
+                self.start_stop_btn.setText("Invalid Primary API Key")
+                self.start_stop_btn.setEnabled(False)
+            elif key_status['key2_provided'] and not key_status['key2_valid']:
+                self.start_stop_btn.setText("Invalid Secondary API Key")
                 self.start_stop_btn.setEnabled(False)
             else:
                 self.start_stop_btn.setText("Start Translating")
@@ -4195,6 +4221,66 @@ class MainWindow(FramelessWidget):
             except Exception as e:
                 print(f"Error cleaning up files for task {task_path}: {e}")
                 continue
+                
+    def validate_api_key_cached(self, api_key, key_number=1):
+        if key_number == 1:
+            if api_key == self.last_validated_key1 and self.api_key1_validated:
+                return True
+            cache_attr = 'api_key1_validated'
+            last_key_attr = 'last_validated_key1'
+        else:
+            if api_key == self.last_validated_key2 and self.api_key2_validated:
+                return True
+            cache_attr = 'api_key2_validated'
+            last_key_attr = 'last_validated_key2'
+        
+        if not api_key.strip() and key_number == 2:
+            setattr(self, cache_attr, True)
+            setattr(self, last_key_attr, api_key)
+            return True
+        
+        if len(api_key.strip()) < 12:
+            setattr(self, cache_attr, False)
+            return False
+        
+        try:
+            from google import genai
+            client = genai.Client(api_key=api_key.strip())
+            result = client.models.count_tokens(model="gemini-2.0-flash", contents="test")
+            
+            setattr(self, cache_attr, True)
+            setattr(self, last_key_attr, api_key)
+            return True
+        except Exception as e:
+            setattr(self, cache_attr, False)
+            print(f"API Key {key_number} validation failed: {e}")
+            return False
+    
+    def validate_both_api_keys(self):
+        key1 = self.api_key_edit.text().strip()
+        key2 = self.api_key2_edit.text().strip()
+        
+        key1_valid = self.validate_api_key_cached(key1, 1)
+        key2_valid = self.validate_api_key_cached(key2, 2) if key2 else True
+        
+        return {
+            'key1_valid': key1_valid,
+            'key2_valid': key2_valid,
+            'key1_provided': bool(key1),
+            'key2_provided': bool(key2),
+            'at_least_one_valid': key1_valid or (key2_valid and key2),
+            'both_provided_both_valid': key1_valid and key2_valid if key2 else key1_valid
+        }
+    
+    def on_api_key1_changed(self):
+        self.api_key1_validated = False
+        self.settings.update({"gemini_api_key": self.api_key_edit.text()})
+        self.update_button_states()
+    
+    def on_api_key2_changed(self):
+        self.api_key2_validated = False
+        self.settings.update({"gemini_api_key2": self.api_key2_edit.text()})
+        self.update_button_states()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
