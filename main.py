@@ -3804,9 +3804,7 @@ class MainWindow(FramelessWidget):
     @Slot(int, str)
     def on_worker_status_message(self, task_idx, message):
         if 0 <= task_idx < len(self.tasks) and self.current_task_index == task_idx:
-            current_text = self.tasks[task_idx]["status_item"].text()
-            if not (current_text.startswith("Thinking") or current_text.startswith("Processing")):
-                self.tasks[task_idx]["status_item"].setText(message)
+            self.tasks[task_idx]["status_item"].setText(message)
 
     @Slot(int, int, str)
     def on_worker_progress_update(self, task_idx, percentage, progress_text):
