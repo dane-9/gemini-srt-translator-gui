@@ -4239,7 +4239,7 @@ class MainWindow(FramelessWidget):
             setattr(self, last_key_attr, api_key)
             return True
         
-        if len(api_key.strip()) < 12:
+        if len(api_key.strip()) < 35:
             setattr(self, cache_attr, False)
             return False
         
