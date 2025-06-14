@@ -2999,7 +2999,7 @@ class MainWindow(FramelessWidget):
                     f'Force cancel the current translation?\n\nFile: {current_task_name}',
                     QMessageBox.Yes | QMessageBox.No, 
                     QMessageBox.No,
-                    "⚠️ WARNING: This will immediately stop translation and DELETE all progress files, output files, and extracted audio for this task. You will need to start over completely."
+                    "WARNING: This will immediately stop the translation and DELETE progress for the current language. Completed languages will be preserved."
                 )
                 if reply == QMessageBox.Yes:
                     self.force_stop_translation()
@@ -3568,7 +3568,7 @@ class MainWindow(FramelessWidget):
                 f"Force cancel translation and exit?{current_task_name}",
                 QMessageBox.Yes | QMessageBox.No, 
                 QMessageBox.No,
-                "⚠️ WARNING: This will immediately stop translation and DELETE all progress files, output files, and extracted audio for the current task."
+                "WARNING: This will immediately stop the translation and DELETE progress for the current language. Completed languages will be preserved."
             )
             if reply == QMessageBox.Yes:
                 if self.active_worker:
