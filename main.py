@@ -3907,10 +3907,10 @@ class MainWindow(FramelessWidget):
         api_key_valid = len(self.api_key_edit.text().strip()) >= 12
         
         if self.stop_after_current_task and is_processing:
-            self.start_stop_btn.setText("Force Cancel Current Task")
+            self.start_stop_btn.setText("Force Cancel Current Language")
             self.start_stop_btn.setEnabled(True)
         elif self.is_running or is_processing:
-            self.start_stop_btn.setText("Stop After Current Task")
+            self.start_stop_btn.setText("Stop After Current Language")
             self.start_stop_btn.setEnabled(True)
         else:
             if not api_key_valid:
