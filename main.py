@@ -167,7 +167,7 @@ DEFAULT_SETTINGS = {
     "gemini_api_key2": "", 
     "target_language": "English",
     "selected_languages": ["en"],
-    "model_name": "gemini-2.5",
+    "model_name": "gemini-2.5-flash",
     "output_file_naming_pattern": "{original_name}.{lang_code}.{modifiers}.srt",
     "update_existing_queue_languages": False,
     "queue_on_exit": "clear_if_translated",
@@ -461,7 +461,7 @@ def run_audio_extraction_subprocess():
     parser.add_argument("--run-audio-extraction", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--gemini_api_key", required=True)
     parser.add_argument("--video_file", required=True)
-    parser.add_argument("--model_name", default="gemini-2.0-flash")
+    parser.add_argument("--model_name", default="gemini-2.5-flash")
     
     args = parser.parse_args()
     
@@ -4451,7 +4451,7 @@ class MainWindow(FramelessWidget):
         try:
             from google import genai
             client = genai.Client(api_key=api_key.strip())
-            result = client.models.count_tokens(model="gemini-2.0-flash", contents="test")
+            result = client.models.count_tokens(model="gemini-2.5-flash-lite-preview-06-17", contents="test")
             
             setattr(self, cache_attr, True)
             setattr(self, last_key_attr, api_key)
