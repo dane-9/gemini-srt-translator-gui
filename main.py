@@ -6,6 +6,8 @@ import subprocess
 import signal
 import time
 import argparse
+import queue
+import threading
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
@@ -46,6 +48,40 @@ def get_persistent_path(relative_path):
         base_path = os.path.dirname(os.path.abspath(__file__))
 
     return os.path.join(base_path, relative_path)
+    
+def setup_ffmpeg_path():
+    if is_compiled():
+        try:
+            ffmpeg_exe_name = "ffmpeg.exe" if os.name == 'nt' else "ffmpeg"
+            ffmpeg_exe = get_resource_path(ffmpeg_exe_name)
+            
+            if os.path.exists(ffmpeg_exe):
+                ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+                current_path = os.environ.get('PATH', '')
+                if ffmpeg_dir not in current_path:
+                    os.environ['PATH'] = ffmpeg_dir + os.pathsep + current_path
+                    
+                os.environ['FFMPEG_BINARY'] = ffmpeg_exe
+                return True
+            
+            app_dir = get_app_directory()
+            ffmpeg_alt = os.path.join(app_dir, ffmpeg_exe_name)
+            if os.path.exists(ffmpeg_alt):
+                ffmpeg_dir = os.path.dirname(ffmpeg_alt)
+                current_path = os.environ.get('PATH', '')
+                if ffmpeg_dir not in current_path:
+                    os.environ['PATH'] = ffmpeg_dir + os.pathsep + current_path
+                os.environ['FFMPEG_BINARY'] = ffmpeg_alt
+                return True
+                
+        except Exception as e:
+            print(f"Error setting up bundled ffmpeg: {e}")
+    
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
 
 def load_svg(svg_path, color="#A0A0A0", size=None):
     try:
@@ -334,6 +370,31 @@ def run_gst_translation_subprocess():
     
     args = parser.parse_args()
     
+    if os.name == 'nt':
+        import subprocess
+
+        original_Popen = subprocess.Popen
+        original_run = subprocess.run
+
+        class PatchedPopen(original_Popen):
+            def __init__(self, *args, **kwargs):
+                if 'creationflags' not in kwargs:
+                    kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+                super().__init__(*args, **kwargs)
+
+        def patched_run(*args, **kwargs):
+            if 'creationflags' not in kwargs:
+                kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+
+            if not kwargs.get('capture_output') and not kwargs.get('stdout') and not kwargs.get('stderr'):
+                kwargs['stdout'] = subprocess.DEVNULL
+                kwargs['stderr'] = subprocess.DEVNULL
+                
+            return original_run(*args, **kwargs)
+
+        subprocess.Popen = PatchedPopen
+        subprocess.run = patched_run
+
     try:
         import gemini_srt_translator as gst
         
@@ -404,10 +465,33 @@ def run_audio_extraction_subprocess():
     
     args = parser.parse_args()
     
+    if os.name == 'nt':
+        import subprocess
+
+        original_Popen = subprocess.Popen
+        original_run = subprocess.run
+
+        class PatchedPopen(original_Popen):
+            def __init__(self, *args, **kwargs):
+                if 'creationflags' not in kwargs:
+                    kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+                super().__init__(*args, **kwargs)
+
+        def patched_run(*args, **kwargs):
+            if 'creationflags' not in kwargs:
+                kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+            
+            if not kwargs.get('capture_output') and not kwargs.get('stdout') and not kwargs.get('stderr'):
+                kwargs['stdout'] = subprocess.DEVNULL
+                kwargs['stderr'] = subprocess.DEVNULL
+
+            return original_run(*args, **kwargs)
+
+        subprocess.Popen = PatchedPopen
+        subprocess.run = patched_run
+    
     try:
         import gemini_srt_translator as gst
-        import threading
-        import time
         
         gst.gemini_api_key = args.gemini_api_key
         gst.video_file = args.video_file
@@ -417,79 +501,30 @@ def run_audio_extraction_subprocess():
         gst.model_name = args.model_name
         
         print("Starting audio extraction and processing...")
+
+        gst.translate()
         
         video_dir = os.path.dirname(args.video_file)
         video_name = os.path.splitext(os.path.basename(args.video_file))[0]
         expected_audio = os.path.join(video_dir, f"{video_name}_extracted.mp3")
-        expected_subtitle = os.path.join(video_dir, f"{video_name}_extracted.srt")
-        main_subtitle = os.path.join(video_dir, f"{video_name}.srt")
         
-        for file_path in [expected_audio, expected_subtitle, main_subtitle]:
-            if os.path.exists(file_path):
+        if os.path.exists(expected_audio):
+            print(f"Success! Audio saved as: {expected_audio}")
+            dummy_subtitle = os.path.join(video_dir, f"{video_name}.srt")
+            if os.path.exists(dummy_subtitle):
                 try:
-                    os.remove(file_path)
-                except:
+                    os.remove(dummy_subtitle)
+                except OSError:
                     pass
-        
-        gst_exception = None
-        
-        def run_gst():
-            nonlocal gst_exception
-            try:
-                gst.translate()
-            except Exception as e:
-                gst_exception = e
-        
-        gst_thread = threading.Thread(target=run_gst, daemon=True)
-        gst_thread.start()
-        
-        max_wait = 300
-        wait_time = 0
-        audio_found = False
-        
-        while wait_time < max_wait and gst_thread.is_alive():
-            if os.path.exists(expected_audio):
-                if not audio_found:
-                    print(f"Success! Audio saved as: {expected_audio}")
-                    try:
-                        file_size = os.path.getsize(expected_audio) / (1024 * 1024)
-                        print(f"Final file size: {file_size:.2f}MB")
-                    except:
-                        print("Audio file created successfully")
-                    audio_found = True
-                
-                if os.path.exists(expected_subtitle):
-                    print(f"Subtitle also extracted: {expected_subtitle}")
-                
-                time.sleep(2)
-                
-                if os.path.exists(main_subtitle):
-                    try:
-                        os.remove(main_subtitle)
-                    except:
-                        pass
-                
-                sys.exit(0)
-            
-            time.sleep(0.5)
-            wait_time += 0.5
-        
-        if gst_exception:
-            print(f"GST error: {gst_exception}")
+            sys.exit(0)
         else:
-            print("Audio extraction timed out or failed")
-        
-        for file_path in [main_subtitle]:
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except:
-                    pass
-        
-        sys.exit(1)
+            print("Audio extraction process finished, but the output file was not found.")
+            sys.exit(1)
         
     except Exception as e:
         print(f"Error during audio extraction: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 class IconTextDelegate(QStyledItemDelegate):
@@ -1757,6 +1792,197 @@ class TranslationWorker(QObject):
     def _should_force_cancel(self):
         return self.force_cancelled
     
+    def _read_stream(self, stream, q):
+        try:
+            for line in iter(stream.readline, ''):
+                q.put(line)
+        except (IOError, ValueError):
+            pass
+        finally:
+            try:
+                stream.close()
+            except (IOError, ValueError):
+                pass
+    
+    def _run_and_monitor_subprocess(self, cmd, line_callback, process_cwd):
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUNBUFFERED"] = "1"
+
+        creation_flags = 0
+        if os.name == 'nt':
+            creation_flags = subprocess.CREATE_NO_WINDOW
+
+        self.process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            bufsize=1,
+            env=env,
+            cwd=process_cwd,
+            creationflags=creation_flags
+        )
+
+        q = queue.Queue()
+        
+        stdout_thread = threading.Thread(target=self._read_stream, args=(self.process.stdout, q), daemon=True)
+        stderr_thread = threading.Thread(target=self._read_stream, args=(self.process.stderr, q), daemon=True)
+        
+        stdout_thread.start()
+        stderr_thread.start()
+
+        while self.process.poll() is None:
+            if self._should_force_cancel():
+                self._send_interrupt_signal()
+                break
+            try:
+                line = q.get(timeout=0.1)
+                line_callback(line)
+            except queue.Empty:
+                continue
+
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._send_interrupt_signal()
+            
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+
+        while not q.empty():
+            try:
+                line = q.get_nowait()
+                line_callback(line)
+            except queue.Empty:
+                break
+            
+        return_code = self.process.returncode if self.process else -1
+        self.process = None
+        
+        if self._should_force_cancel():
+            return -1
+
+        return return_code
+
+    def _extract_audio_pass(self):
+        try:
+            queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
+            video_file = queue_entry.get("video_file")
+            
+            if not video_file or not os.path.exists(video_file):
+                self.status_message.emit(self.task_index, "Video file not found")
+                return False
+            
+            self.status_message.emit(self.task_index, "Extracting Audio")
+            self.queue_manager.set_audio_extraction_status(self.input_file_path, "extracting")
+            
+            executable_path = get_executable_path()
+            
+            if is_compiled():
+                cmd = [executable_path, "--run-audio-extraction"]
+            else:
+                cmd = [sys.executable, executable_path, "--run-audio-extraction"]
+            
+            cmd.extend(["--gemini_api_key", "DUMMY_KEY_FOR_AUDIO_EXTRACTION_ONLY"])
+
+            cmd.extend(["--video_file", video_file])
+            cmd.extend(["--model_name", self.model_name])
+            
+            def audio_line_callback(line):
+                if not line: return
+                clean_line = line.strip()
+                if "Starting audio extraction" in clean_line:
+                    self.progress_update.emit(self.task_index, 30, "Starting audio extraction...")
+                elif "Success! Audio saved as:" in clean_line:
+                    self.progress_update.emit(self.task_index, 90, "Audio extraction completed")
+                
+            process_cwd = get_app_directory()
+            self._run_and_monitor_subprocess(cmd, audio_line_callback, process_cwd)
+            
+            if self._should_force_cancel():
+                self._cleanup_current_language_only()
+                return False
+
+            video_basename = os.path.basename(video_file)
+            video_name = os.path.splitext(video_basename)[0]
+            video_dir = os.path.dirname(video_file)
+            expected_audio = os.path.join(video_dir, f"{video_name}_extracted.mp3")
+            expected_subtitle = os.path.join(video_dir, f"{video_name}_extracted.srt")
+            
+            if os.path.exists(expected_audio):
+                self.queue_manager.set_audio_extraction_status(
+                    self.input_file_path, "completed", expected_audio
+                )
+                if os.path.exists(expected_subtitle):
+                    if self.input_file_path in self.queue_manager.state["queue_state"]:
+                        self.queue_manager.state["queue_state"][self.input_file_path]["extracted_subtitle_file"] = expected_subtitle
+                        self.queue_manager._save_queue_state()
+                self.status_message.emit(self.task_index, "Audio extraction successful")
+                return True
+            else:
+                self.queue_manager.set_audio_extraction_status(self.input_file_path, "failed")
+                self.status_message.emit(self.task_index, "Audio extraction failed")
+                return False
+    
+        except Exception as e:
+            print(f"Critical error in _extract_audio_pass: {e}")
+            self.queue_manager.set_audio_extraction_status(self.input_file_path, "failed")
+            return False
+
+    def _execute_translation_command(self, cmd, lang_code, completed_count, total_languages):
+        lang_name = self._get_language_name(lang_code)
+        
+        if total_languages > 1:
+            simple_status = f"Translating {lang_name} {completed_count + 1}/{total_languages}"
+        else:
+            simple_status = f"Translating {lang_name}"
+        
+        self.status_message.emit(self.task_index, simple_status)
+        
+        found_completion = [False]
+
+        def translation_line_callback(line):
+            if not line: return
+            line = line.strip()
+
+            if "Resuming from line" in line:
+                resume_match = re.search(r"Resuming from line (\d+)", line)
+                if resume_match:
+                    resume_line = resume_match.group(1)
+                    self.status_message.emit(self.task_index, f"Resuming {lang_name} from line {resume_line}")
+                return
+
+            progress_match = re.search(r"Translating:\s*\|.*\|\s*(\d+)%\s*\(([^)]+)\)[^|]*\|\s*(Thinking|Processing)", line)
+            
+            if progress_match:
+                lang_percent = int(progress_match.group(1))
+                details = progress_match.group(2)
+                state = progress_match.group(3)
+                progress_bar_text = f"{lang_percent}% - {details} | {state}..."
+                self.progress_update.emit(self.task_index, lang_percent, progress_bar_text)
+                return
+
+            elif "Translation completed successfully!" in line:
+                found_completion[0] = True
+            
+            elif "error" in line.lower() or "traceback" in line.lower():
+                print(f"GST subprocess error: {line}")
+
+        process_cwd = os.path.dirname(self.input_file_path)
+        return_code = self._run_and_monitor_subprocess(cmd, translation_line_callback, process_cwd)
+
+        self.is_extracting = False
+        self.pending_force_cancellation = False
+
+        if self._should_force_cancel() or return_code == -1:
+            self._cleanup_current_language_only()
+            return False
+        
+        return return_code == 0 and found_completion[0]
+        
     def _generate_output_filename(self, lang_code):
         original_basename = os.path.basename(self.input_file_path)
         subtitle_parsed = _parse_subtitle_filename(original_basename)
@@ -1812,131 +2038,6 @@ class TranslationWorker(QObject):
                 print(f"Error reading progress file {progress_file}: {e}")
                 return None, None
         return None, None
-        
-    def _extract_audio_pass(self):
-        try:
-            queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
-            video_file = queue_entry.get("video_file")
-            
-            if not video_file or not os.path.exists(video_file):
-                self.status_message.emit(self.task_index, "Video file not found")
-                return False
-            
-            self.status_message.emit(self.task_index, "Extracting Audio")
-            self.queue_manager.set_audio_extraction_status(self.input_file_path, "extracting")
-            
-            executable_path = get_executable_path()
-            
-            if is_compiled():
-                cmd = [executable_path, "--run-audio-extraction"]
-            else:
-                cmd = [sys.executable, executable_path, "--run-audio-extraction"]
-            
-            cmd.extend(["--gemini_api_key", self.api_key])
-            cmd.extend(["--video_file", video_file])
-            cmd.extend(["--model_name", self.model_name])
-            
-            env = os.environ.copy()
-            env["PYTHONIOENCODING"] = "utf-8"
-            env["PYTHONUNBUFFERED"] = "1"
-    
-            creation_flags = 0
-            if os.name == 'nt':
-                creation_flags = subprocess.CREATE_NO_WINDOW
-    
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=0,
-                env=env,
-                cwd=get_app_directory(),
-                creationflags=creation_flags
-            )
-            
-            extracted_audio_file = None
-            extracted_subtitle_file = None
-            
-            while True:
-                if self._should_force_cancel():
-                    try:
-                        if os.name == 'nt':
-                            subprocess.run(f"taskkill /F /PID {self.process.pid}", shell=True, timeout=2, capture_output=True)
-                        else:
-                            self.process.kill()
-                        self.process.wait(timeout=1)
-                    except:
-                        pass
-                        
-                    self._cleanup_current_language_only()
-                    return False
-                
-                if not self.process:
-                    break
-                    
-                poll_result = self.process.poll()
-                if poll_result is not None:
-                    break
-                
-                try:
-                    if not self.process or not self.process.stdout:
-                        break
-                        
-                    line = self.process.stdout.readline()
-                    if line:
-                        clean_line = line.strip()
-                        
-                        if "Starting audio extraction and processing" in clean_line:
-                            self.progress_update.emit(self.task_index, 30, "Starting audio extraction...")
-                        elif "Success! Audio saved as:" in clean_line:
-                            if ":" in clean_line:
-                                extracted_audio_file = clean_line.split("Success! Audio saved as:")[-1].strip()
-                            self.progress_update.emit(self.task_index, 90, "Audio extraction completed")
-                        elif "Final file size:" in clean_line:
-                            self.progress_update.emit(self.task_index, 95, "Audio extraction finished")
-                            
-                except Exception:
-                    break
-    
-            return_code = self.process.returncode if self.process else -1
-            self.process = None
-    
-            if self._should_force_cancel():
-                self._cleanup_current_language_only()
-                return False
-    
-            video_basename = os.path.basename(video_file)
-            video_name = os.path.splitext(video_basename)[0]
-            video_dir = os.path.dirname(video_file)
-            
-            expected_audio = os.path.join(video_dir, f"{video_name}_extracted.mp3")
-            expected_subtitle = os.path.join(video_dir, f"{video_name}_extracted.srt")
-            
-            if os.path.exists(expected_audio):
-                self.queue_manager.set_audio_extraction_status(
-                    self.input_file_path, 
-                    "completed", 
-                    expected_audio
-                )
-                
-                if os.path.exists(expected_subtitle):
-                    if self.input_file_path in self.queue_manager.state["queue_state"]:
-                        self.queue_manager.state["queue_state"][self.input_file_path]["extracted_subtitle_file"] = expected_subtitle
-                        self.queue_manager._save_queue_state()
-                
-                self.status_message.emit(self.task_index, "Audio extraction successful")
-                return True
-            else:
-                self.queue_manager.set_audio_extraction_status(self.input_file_path, "failed")
-                self.status_message.emit(self.task_index, "Audio extraction failed")
-                return False
-    
-        except Exception:
-            if self._should_force_cancel():
-                self._cleanup_current_language_only()
-            self.queue_manager.set_audio_extraction_status(self.input_file_path, "failed")
-            return False
         
     def _cleanup_for_fresh_start(self, target_language):
         try:
@@ -2076,120 +2177,6 @@ class TranslationWorker(QObject):
                 cmd.extend(["--thinking", "True"])
         
         return cmd
-        
-    def _execute_translation_command(self, cmd, lang_code, completed_count, total_languages):
-        lang_name = self._get_language_name(lang_code)
-        
-        if total_languages > 1:
-            simple_status = f"Translating {lang_name} {completed_count + 1}/{total_languages}"
-        else:
-            simple_status = f"Translating {lang_name}"
-        
-        self.status_message.emit(self.task_index, simple_status)
-        
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["PYTHONUNBUFFERED"] = "1"
-    
-        creation_flags = 0
-        if os.name == 'nt':
-            creation_flags = subprocess.CREATE_NO_WINDOW
-    
-        self.process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=0,
-            env=env,
-            cwd=os.path.dirname(self.input_file_path),
-            creationflags=creation_flags
-        )
-    
-        found_completion = False
-        line_count = 0
-        
-        is_video_command = "-v" in cmd and "--extract-audio" not in cmd
-        if is_video_command:
-            self.is_extracting = True
-    
-        for line in iter(self.process.stdout.readline, ''):
-            line_count += 1
-            
-            if self._should_force_cancel():
-                try:
-                    if os.name == 'nt':
-                        subprocess.run(f"taskkill /F /PID {self.process.pid}", shell=True, timeout=2, capture_output=True)
-                    else:
-                        self.process.kill()
-                    self.process.wait(timeout=1)
-                except:
-                    pass
-                break
-    
-            line = line.strip()
-            if not line:
-                continue
-            
-            if is_video_command:
-                if ("Please provide a target language" in line or 
-                    "Final file size:" in line or
-                    "Translation completed successfully!" in line):
-                    self.is_extracting = False
-                    
-                    if self.pending_force_cancellation:
-                        self._send_interrupt_signal()
-                        break
-    
-            if "Resuming from line" in line:
-                resume_match = re.search(r"Resuming from line (\d+)", line)
-                if resume_match:
-                    resume_line = resume_match.group(1)
-                    self.status_message.emit(self.task_index, f"Resuming {lang_name} from line {resume_line}")
-                continue
-    
-            progress_match = re.search(r"Translating:\s*\|.*\|\s*(\d+)%\s*\(([^)]+)\)[^|]*\|\s*(Thinking|Processing)", line)
-            
-            if progress_match:
-                lang_percent = int(progress_match.group(1))
-                details = progress_match.group(2)
-                state = progress_match.group(3)
-                
-                progress_bar_text = f"{lang_percent}% - {details} | {state}..."
-                
-                self.progress_update.emit(self.task_index, lang_percent, progress_bar_text)
-                continue
-    
-            elif "Translation completed successfully!" in line:
-                found_completion = True
-                break
-    
-        if self.process and self.process.stderr and not self._should_force_cancel():
-            try:
-                stderr_output = self.process.stderr.read()
-                if stderr_output:
-                    print(f"GST stderr output: {stderr_output}")
-            except Exception:
-                pass
-    
-        if self.process and not self._should_force_cancel():
-            try:
-                return_code = self.process.wait()
-            except Exception:
-                return_code = -1
-        else:
-            return_code = -1
-        
-        self.process = None
-        
-        self.is_extracting = False
-        self.pending_force_cancellation = False
-    
-        if self._should_force_cancel():
-            self._cleanup_current_language_only()
-            return False
-    
-        return return_code == 0 and found_completion
     
     def _get_language_name(self, lang_code):
         for name, (two_letter, three_letter) in LANGUAGES.items():
@@ -2202,35 +2189,17 @@ class TranslationWorker(QObject):
         if process and process.poll() is None:
             try:
                 if os.name == 'nt':
-                    import signal
-                    try:
-                        process.send_signal(signal.CTRL_C_EVENT)
-                        if not process.wait(timeout=1):
-                            process.terminate()
-                            if not process.wait(timeout=1):
-                                process.kill()
-                                process.wait(timeout=1)
-                    except:
-                        try:
-                            process.terminate()
-                            if not process.wait(timeout=1):
-                                process.kill()
-                                process.wait(timeout=1)
-                        except:
-                            try:
-                                import subprocess
-                                subprocess.run(f"taskkill /F /PID {process.pid}", shell=True, timeout=2)
-                            except:
-                                pass
+                    subprocess.run(f"taskkill /F /T /PID {process.pid}", shell=True, timeout=3, capture_output=True)
                 else:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=1)
-            except Exception as e:
-                pass
+                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                
+                process.wait(timeout=2)
+            except Exception:
+                try:
+                    process.kill()
+                    process.wait(timeout=1)
+                except:
+                    pass
                 
     def _cleanup_all_task_files(self):
         try:
@@ -2683,18 +2652,7 @@ class TranslationWorker(QObject):
         
         process = self.process
         if process and process.poll() is None:
-            try:
-                if os.name == 'nt':
-                    subprocess.run(f"taskkill /F /PID {process.pid}", shell=True, timeout=3, capture_output=True)
-                else:
-                    process.kill()
-                
-                try:
-                    process.wait(timeout=1)
-                except:
-                    pass
-            except:
-                pass
+            self._send_interrupt_signal()
     
     def cancel(self):
         self.force_cancel()
@@ -2876,6 +2834,10 @@ class CustomTitleBarWidget(QWidget):
 class MainWindow(FramelessWidget):
     def __init__(self):
         super().__init__(hint=['min', 'max', 'close'])
+        
+        ffmpeg_available = setup_ffmpeg_path()
+        if not ffmpeg_available:
+            print("Warning: FFmpeg not found. Video+subtitle tasks may fail.")
         
         self.setWindowTitle("Gemini SRT Translator")
         
