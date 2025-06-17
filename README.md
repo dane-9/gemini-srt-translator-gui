@@ -6,7 +6,7 @@
 ## Features
 
 -   **Batch Processing** - Process multiple files at once, even from different directories. The queue can handle any combination of task types:
-    -   **Subtitles Only:** Quickly translate a folder full of `.srt` files.
+    -   **Subtitle:** Add `.srt` files to translate.
     -   **Video + Subtitle:** Add a video and its matching `.srt` file. The GUI automatically pairs them, using the video's audio for context to produce the highest quality translation.
     -   **Video Only:** Add a video by itself to extract audio and attempt to translate the first embedded subtitle track. (Note: This can fail if the embedded track is not in SRT format).
 -   **Multi-Language Translation** - Translate a single file into dozens of languages at once using a searchable language selection dialog.
