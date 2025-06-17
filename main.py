@@ -167,7 +167,7 @@ DEFAULT_SETTINGS = {
     "gemini_api_key2": "", 
     "target_language": "English",
     "selected_languages": ["en"],
-    "model_name": "gemini-2.5-flash-preview-05-20",
+    "model_name": "gemini-2.5",
     "output_file_naming_pattern": "{original_name}.{lang_code}.{modifiers}.srt",
     "update_existing_queue_languages": False,
     "queue_on_exit": "clear_if_translated",
@@ -2917,7 +2917,7 @@ class MainWindow(FramelessWidget):
         api_keys_model_layout.addWidget(self.api_key2_edit)
         
         self.model_name_edit = CustomLineEdit()
-        self.model_name_edit.setText(self.settings.get("model_name", "gemini-2.5-flash-preview-05-20"))
+        self.model_name_edit.setText(self.settings.get("model_name", "gemini-2.5-flash"))
         self.model_name_edit.set_right_text("Model Used", font_size=9, italic=False, color="#555555")
         self.model_name_edit.textChanged.connect(lambda text: self.settings.update({"model_name": text}))
         api_keys_model_layout.addWidget(self.model_name_edit)
