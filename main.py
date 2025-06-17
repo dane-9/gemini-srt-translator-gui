@@ -3195,7 +3195,7 @@ class MainWindow(FramelessWidget):
             self.active_worker.force_cancel()
 
     def on_item_changed(self, item):
-        if item.column() == 2:
+        if item.column() == 3:
             row = item.row()
             if 0 <= row < len(self.tasks):
                 self.tasks[row]["description"] = item.text()
@@ -3204,13 +3204,13 @@ class MainWindow(FramelessWidget):
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.Copy):
             current_index = self.tree_view.currentIndex()
-            if current_index.isValid() and current_index.column() == 2:
+            if current_index.isValid() and current_index.column() == 3:
                 item = self.model.itemFromIndex(current_index)
                 if item:
                     self.clipboard_description = item.text()
         elif event.matches(QKeySequence.Paste):
             current_index = self.tree_view.currentIndex()
-            if current_index.isValid() and current_index.column() == 2:
+            if current_index.isValid() and current_index.column() == 3:
                 item = self.model.itemFromIndex(current_index)
                 if item:
                     item.setText(self.clipboard_description)
@@ -3240,12 +3240,14 @@ class MainWindow(FramelessWidget):
         for row in range(self.model.rowCount()):
             path_item = self.model.item(row, 0)
             lang_item = self.model.item(row, 1)
-            desc_item = self.model.item(row, 2)
-            status_item = self.model.item(row, 3)
+            type_item = self.model.item(row, 2)
+            desc_item = self.model.item(row, 3)
+            status_item = self.model.item(row, 4)
             
             for task in self.tasks:
                 if (task["path_item"] is path_item and 
                     task["lang_item"] is lang_item and 
+                    task["type_item"] is type_item and
                     task["desc_item"] is desc_item and
                     task["status_item"] is status_item):
                     new_tasks.append(task)
@@ -3267,10 +3269,10 @@ class MainWindow(FramelessWidget):
         self.tree_view.setSortingEnabled(False)
         
         self.model.clear()
-        self.model.setHorizontalHeaderLabels(["File Name", "Output Languages", "Description", "Status"])
+        self.model.setHorizontalHeaderLabels(["File Name", "Output Languages", "Type", "Description", "Status"])
         
         for task in self.tasks:
-            self.model.appendRow([task["path_item"], task["lang_item"], task["desc_item"], task["status_item"]])
+            self.model.appendRow([task["path_item"], task["lang_item"], task["type_item"], task["desc_item"], task["status_item"]])
         
         for i, width in enumerate(col_widths):
             if i < self.model.columnCount():
