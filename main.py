@@ -4017,7 +4017,11 @@ class MainWindow(FramelessWidget):
             self.queue_manager.sync_audio_extraction_status(task_path)
             
             if success:
-                self._cleanup_task_audio_and_extracted_files(task_path, "success")
+                progress_summary = self.queue_manager.get_language_progress_summary(task_path)
+                if progress_summary == "Translated":
+                    self._cleanup_task_audio_and_extracted_files(task_path, "success")
+                else:
+                    self._cleanup_task_audio_and_extracted_files(task_path, "partial_success")
             else:
                 self._cleanup_task_audio_and_extracted_files(task_path, "failure")
             
@@ -4240,6 +4244,7 @@ class MainWindow(FramelessWidget):
     def _should_cleanup_audio(self, scenario):
         scenario_map = {
             "success": "cleanup_audio_on_success",
+            "partial_success": None,
             "failure": "cleanup_audio_on_failure", 
             "cancel": "cleanup_audio_on_cancel",
             "remove": "cleanup_audio_on_remove",
@@ -4307,7 +4312,7 @@ class MainWindow(FramelessWidget):
         
         predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
         files_to_delete.add(predicted_subtitle_path)
-        
+    
         for file_path in files_to_delete:
             if file_path and os.path.exists(file_path):
                 try:
@@ -4315,22 +4320,27 @@ class MainWindow(FramelessWidget):
                 except Exception as e:
                     pass
     
-        should_cleanup_audio = self._should_cleanup_audio(scenario)
-        
-        if should_cleanup_audio:
-            audio_file, _ = self.queue_manager.sync_audio_extraction_status(task_path)
-            
-            if audio_file and os.path.exists(audio_file):
-                try:
-                    os.remove(audio_file)
-                except Exception as e:
-                    pass
-            
-            self.queue_manager.cleanup_extracted_audio(task_path)
-        else:
+        if scenario == "partial_success":
             if task_path in self.queue_manager.state["queue_state"]:
                 self.queue_manager.state["queue_state"][task_path]["extracted_subtitle_file"] = None
                 self.queue_manager._save_queue_state()
+        else:
+            should_cleanup_audio = self._should_cleanup_audio(scenario)
+            
+            if should_cleanup_audio:
+                audio_file, _ = self.queue_manager.sync_audio_extraction_status(task_path)
+                
+                if audio_file and os.path.exists(audio_file):
+                    try:
+                        os.remove(audio_file)
+                    except Exception as e:
+                        pass
+                
+                self.queue_manager.cleanup_extracted_audio(task_path)
+            else:
+                if task_path in self.queue_manager.state["queue_state"]:
+                    self.queue_manager.state["queue_state"][task_path]["extracted_subtitle_file"] = None
+                    self.queue_manager._save_queue_state()
                 
     def _cleanup_all_task_files(self):
         for task in self.tasks:
