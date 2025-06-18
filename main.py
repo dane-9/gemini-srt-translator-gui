@@ -1936,7 +1936,14 @@ class TranslationWorker(QObject):
         lang_name = self._get_language_name(lang_code)
         
         if total_languages > 1:
-            simple_status = f"Translating {lang_name} {completed_count + 1}/{total_languages}"
+            if self.queue_manager and self.input_file_path in self.queue_manager.state["queue_state"]:
+                languages = self.queue_manager.state["queue_state"][self.input_file_path].get("languages", {})
+                actual_completed = sum(1 for lang_data in languages.values() if lang_data.get("status") == "completed")
+                current_position = actual_completed + 1
+            else:
+                current_position = completed_count + 1
+                
+            simple_status = f"Translating {lang_name} {current_position}/{total_languages}"
         else:
             simple_status = f"Translating {lang_name}"
         
