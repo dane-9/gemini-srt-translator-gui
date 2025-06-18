@@ -1936,7 +1936,14 @@ class TranslationWorker(QObject):
         lang_name = self._get_language_name(lang_code)
         
         if total_languages > 1:
-            simple_status = f"Translating {lang_name} {completed_count + 1}/{total_languages}"
+            if self.queue_manager and self.input_file_path in self.queue_manager.state["queue_state"]:
+                languages = self.queue_manager.state["queue_state"][self.input_file_path].get("languages", {})
+                actual_completed = sum(1 for lang_data in languages.values() if lang_data.get("status") == "completed")
+                current_position = actual_completed + 1
+            else:
+                current_position = completed_count + 1
+                
+            simple_status = f"Translating {lang_name} {current_position}/{total_languages}"
         else:
             simple_status = f"Translating {lang_name}"
         
@@ -2207,6 +2214,10 @@ class TranslationWorker(QObject):
             if os.path.exists(progress_file):
                 os.remove(progress_file)
             
+            app_dir_progress = os.path.join(get_app_directory(), os.path.basename(progress_file))
+            if os.path.exists(app_dir_progress):
+                os.remove(app_dir_progress)
+            
             original_basename = os.path.basename(self.input_file_path)
             original_dir = os.path.dirname(self.input_file_path)
             
@@ -2269,7 +2280,6 @@ class TranslationWorker(QObject):
                 
                 base_dir = os.path.dirname(source_file_for_naming)
                 file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
-                
                 file_name_without_ext = _strip_language_codes_from_name(file_name_without_ext)
     
                 predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
@@ -2602,16 +2612,10 @@ class TranslationWorker(QObject):
                 
                 base_dir = os.path.dirname(source_file_for_naming)
                 file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
-                
                 file_name_without_ext = _strip_language_codes_from_name(file_name_without_ext)
     
                 predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
                 files_to_delete.add(predicted_subtitle_path)
-                
-                main_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}.srt")
-
-                if main_subtitle_path != self.input_file_path:
-                    files_to_delete.add(main_subtitle_path)
     
                 for file_path in files_to_delete:
                     if file_path and os.path.exists(file_path):
@@ -4013,7 +4017,11 @@ class MainWindow(FramelessWidget):
             self.queue_manager.sync_audio_extraction_status(task_path)
             
             if success:
-                self._cleanup_task_audio_and_extracted_files(task_path, "success")
+                progress_summary = self.queue_manager.get_language_progress_summary(task_path)
+                if progress_summary == "Translated":
+                    self._cleanup_task_audio_and_extracted_files(task_path, "success")
+                else:
+                    self._cleanup_task_audio_and_extracted_files(task_path, "partial_success")
             else:
                 self._cleanup_task_audio_and_extracted_files(task_path, "failure")
             
@@ -4236,6 +4244,7 @@ class MainWindow(FramelessWidget):
     def _should_cleanup_audio(self, scenario):
         scenario_map = {
             "success": "cleanup_audio_on_success",
+            "partial_success": None,
             "failure": "cleanup_audio_on_failure", 
             "cancel": "cleanup_audio_on_cancel",
             "remove": "cleanup_audio_on_remove",
@@ -4299,15 +4308,10 @@ class MainWindow(FramelessWidget):
         
         base_dir = os.path.dirname(source_file_for_naming)
         file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
-    
         file_name_without_ext = _strip_language_codes_from_name(file_name_without_ext)
         
         predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
         files_to_delete.add(predicted_subtitle_path)
-        
-        main_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}.srt")
-        if main_subtitle_path != task_path:
-            files_to_delete.add(main_subtitle_path)
     
         for file_path in files_to_delete:
             if file_path and os.path.exists(file_path):
@@ -4316,22 +4320,27 @@ class MainWindow(FramelessWidget):
                 except Exception as e:
                     pass
     
-        should_cleanup_audio = self._should_cleanup_audio(scenario)
-        
-        if should_cleanup_audio:
-            audio_file, _ = self.queue_manager.sync_audio_extraction_status(task_path)
-            
-            if audio_file and os.path.exists(audio_file):
-                try:
-                    os.remove(audio_file)
-                except Exception as e:
-                    pass
-            
-            self.queue_manager.cleanup_extracted_audio(task_path)
-        else:
+        if scenario == "partial_success":
             if task_path in self.queue_manager.state["queue_state"]:
                 self.queue_manager.state["queue_state"][task_path]["extracted_subtitle_file"] = None
                 self.queue_manager._save_queue_state()
+        else:
+            should_cleanup_audio = self._should_cleanup_audio(scenario)
+            
+            if should_cleanup_audio:
+                audio_file, _ = self.queue_manager.sync_audio_extraction_status(task_path)
+                
+                if audio_file and os.path.exists(audio_file):
+                    try:
+                        os.remove(audio_file)
+                    except Exception as e:
+                        pass
+                
+                self.queue_manager.cleanup_extracted_audio(task_path)
+            else:
+                if task_path in self.queue_manager.state["queue_state"]:
+                    self.queue_manager.state["queue_state"][task_path]["extracted_subtitle_file"] = None
+                    self.queue_manager._save_queue_state()
                 
     def _cleanup_all_task_files(self):
         for task in self.tasks:
@@ -4396,18 +4405,6 @@ class MainWindow(FramelessWidget):
                     
                     os.remove(output_file)
                     
-                queue_entry = self.queue_manager.state["queue_state"].get(task_path, {})
-                if queue_entry.get("task_type") in ["video", "video+subtitle"]:
-                    video_file = queue_entry.get("video_file")
-                    if video_file:
-                        video_dir = os.path.dirname(video_file)
-                        video_name = os.path.splitext(os.path.basename(video_file))[0]
-                        video_name_cleaned = _strip_language_codes_from_name(video_name)
-                        
-                        main_subtitle_from_video = os.path.join(video_dir, f"{video_name_cleaned}.srt")
-                        if os.path.exists(main_subtitle_from_video) and main_subtitle_from_video != task_path:
-                            os.remove(main_subtitle_from_video)
-                
                 self._cleanup_task_audio_and_extracted_files(task_path, "exit")
                         
             except Exception as e:
