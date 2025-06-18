@@ -2207,6 +2207,10 @@ class TranslationWorker(QObject):
             if os.path.exists(progress_file):
                 os.remove(progress_file)
             
+            app_dir_progress = os.path.join(get_app_directory(), os.path.basename(progress_file))
+            if os.path.exists(app_dir_progress):
+                os.remove(app_dir_progress)
+            
             original_basename = os.path.basename(self.input_file_path)
             original_dir = os.path.dirname(self.input_file_path)
             
@@ -2269,7 +2273,6 @@ class TranslationWorker(QObject):
                 
                 base_dir = os.path.dirname(source_file_for_naming)
                 file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
-                
                 file_name_without_ext = _strip_language_codes_from_name(file_name_without_ext)
     
                 predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
@@ -2602,16 +2605,10 @@ class TranslationWorker(QObject):
                 
                 base_dir = os.path.dirname(source_file_for_naming)
                 file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
-                
                 file_name_without_ext = _strip_language_codes_from_name(file_name_without_ext)
     
                 predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
                 files_to_delete.add(predicted_subtitle_path)
-                
-                main_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}.srt")
-
-                if main_subtitle_path != self.input_file_path:
-                    files_to_delete.add(main_subtitle_path)
     
                 for file_path in files_to_delete:
                     if file_path and os.path.exists(file_path):
@@ -4299,16 +4296,11 @@ class MainWindow(FramelessWidget):
         
         base_dir = os.path.dirname(source_file_for_naming)
         file_name_without_ext = os.path.splitext(os.path.basename(source_file_for_naming))[0]
-    
         file_name_without_ext = _strip_language_codes_from_name(file_name_without_ext)
         
         predicted_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}_extracted.srt")
         files_to_delete.add(predicted_subtitle_path)
         
-        main_subtitle_path = os.path.join(base_dir, f"{file_name_without_ext}.srt")
-        if main_subtitle_path != task_path:
-            files_to_delete.add(main_subtitle_path)
-    
         for file_path in files_to_delete:
             if file_path and os.path.exists(file_path):
                 try:
@@ -4396,18 +4388,6 @@ class MainWindow(FramelessWidget):
                     
                     os.remove(output_file)
                     
-                queue_entry = self.queue_manager.state["queue_state"].get(task_path, {})
-                if queue_entry.get("task_type") in ["video", "video+subtitle"]:
-                    video_file = queue_entry.get("video_file")
-                    if video_file:
-                        video_dir = os.path.dirname(video_file)
-                        video_name = os.path.splitext(os.path.basename(video_file))[0]
-                        video_name_cleaned = _strip_language_codes_from_name(video_name)
-                        
-                        main_subtitle_from_video = os.path.join(video_dir, f"{video_name_cleaned}.srt")
-                        if os.path.exists(main_subtitle_from_video) and main_subtitle_from_video != task_path:
-                            os.remove(main_subtitle_from_video)
-                
                 self._cleanup_task_audio_and_extracted_files(task_path, "exit")
                         
             except Exception as e:
