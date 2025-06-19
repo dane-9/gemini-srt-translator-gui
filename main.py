@@ -619,10 +619,12 @@ class TMDBLookupWorker(QObject):
     finished = Signal(str, str, bool)
     status_update = Signal(str, str)
     
-    def __init__(self, file_path, api_key):
+    def __init__(self, file_path, api_key, movie_template, episode_template):
         super().__init__()
         self.file_path = file_path
         self.api_key = api_key
+        self.movie_template = movie_template
+        self.episode_template = episode_template
         self.base_url = "https://api.themoviedb.org/3"
         
     def run(self):
@@ -733,14 +735,15 @@ class TMDBLookupWorker(QObject):
         if not movie_details:
             return ""
         
-        title = movie_details.get('title', '')
-        genres = [g['name'] for g in movie_details.get('genres', [])]
-        genre_str = '/'.join(genres) if genres else 'Unknown'
-        release_date = movie_details.get('release_date', '')
-        year = release_date[:4] if release_date else 'Unknown'
-        overview = movie_details.get('overview', '')
+        movie_data = {
+            'movie.title': movie_details.get('title', ''),
+            'movie.year': movie_details.get('release_date', '')[:4] if movie_details.get('release_date') else '',
+            'movie.overview': movie_details.get('overview', ''),
+            'movie.genres': '/'.join([g['name'] for g in movie_details.get('genres', [])]),
+            'movie.genre': movie_details.get('genres', [{}])[0].get('name', '') if movie_details.get('genres') else ''
+        }
         
-        return f"{title} - {genre_str} ({year}): {overview}"
+        return self._apply_template(self.movie_template, movie_data)
     
     def _lookup_episode(self, show_title, season, episode):
         search_result = self._make_request('search/tv', {'query': show_title})
@@ -758,16 +761,25 @@ class TMDBLookupWorker(QObject):
         if not episode_details:
             return ""
         
-        show_name = tv_details.get('name', '')
-        show_overview = tv_details.get('overview', '')
-        episode_name = episode_details.get('name', '')
-        episode_overview = episode_details.get('overview', '')
+        episode_data = {
+            'show.title': tv_details.get('name', ''),
+            'show.overview': tv_details.get('overview', ''),
+            'show.genres': '/'.join([g['name'] for g in tv_details.get('genres', [])]),
+            'show.genre': tv_details.get('genres', [{}])[0].get('name', '') if tv_details.get('genres') else '',
+            'episode.title': episode_details.get('name', ''),
+            'episode.overview': episode_details.get('overview', ''),
+            'episode.number': f"S{season:02d}E{episode:02d}"
+        }
         
-        season_str = f"S{season:02d}E{episode:02d}"
-        if episode_name:
-            season_str += f' "{episode_name}"'
+        return self._apply_template(self.episode_template, episode_data)
+    
+    def _apply_template(self, template, data):
+        result = template
+        for key, value in data.items():
+            if value:
+                result = result.replace(f'{{{key}}}', str(value))
         
-        return f'{show_name} - {show_overview} {season_str}: {episode_overview}'
+        return result
 
 def _validate_tmdb_api_key(api_key):
     if not api_key or len(api_key.strip()) < 30:
@@ -4920,7 +4932,10 @@ class MainWindow(FramelessWidget):
         if file_path in self.tmdb_lookup_workers:
             return
         
-        worker = TMDBLookupWorker(file_path, api_key)
+        movie_template = self.settings.get("tmdb_movie_template", "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}")
+        episode_template = self.settings.get("tmdb_episode_template", "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}")
+        
+        worker = TMDBLookupWorker(file_path, api_key, movie_template, episode_template)
         thread = QThread(self)
         
         worker.moveToThread(thread)
