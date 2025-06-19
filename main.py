@@ -1785,7 +1785,7 @@ class SettingsDialog(CustomFramelessDialog):
         self.movie_template_display = QLabel()
         self.movie_template_display.setWordWrap(True)
         self.movie_template_display.setStyleSheet("background-color: #2a2a2a; padding: 10px; border-radius: 4px; font-family: monospace;")
-        self.movie_template_display.setText(self.settings.get("tmdb_movie_template", "").replace('\n', '<br>'))
+        self._update_movie_template_display()
         movie_layout.addWidget(self.movie_template_display)
         
         tmdb_layout.addWidget(movie_section)
@@ -1801,7 +1801,7 @@ class SettingsDialog(CustomFramelessDialog):
         self.episode_template_display = QLabel()
         self.episode_template_display.setWordWrap(True)
         self.episode_template_display.setStyleSheet("background-color: #2a2a2a; padding: 10px; border-radius: 4px; font-family: monospace;")
-        self.episode_template_display.setText(self.settings.get("tmdb_episode_template", "").replace('\n', '<br>'))
+        self._update_episode_template_display()
         episode_layout.addWidget(self.episode_template_display)
         
         tmdb_layout.addWidget(episode_section)
@@ -1847,6 +1847,14 @@ class SettingsDialog(CustomFramelessDialog):
             self.tmdb_content_widget.setStyleSheet("color: grey;")
         else:
             self.tmdb_content_widget.setStyleSheet("")
+            
+    def _update_movie_template_display(self):
+        template = self.settings.get("tmdb_movie_template", "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}")
+        self.movie_template_display.setText(template.replace('\n', '<br>'))
+    
+    def _update_episode_template_display(self):
+        template = self.settings.get("tmdb_episode_template", "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}")
+        self.episode_template_display.setText(template.replace('\n', '<br>'))
     
     def reset_defaults(self):
         self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
@@ -1882,8 +1890,10 @@ class SettingsDialog(CustomFramelessDialog):
                 self.model_checkboxes[key].setChecked(default_val)
         
         self.tmdb_checkbox.setChecked(False)
-        self.movie_template_display.setText("Movie: {movie.title}<br>Released: {movie.year}<br>Genre(s): {movie.genres}<br>Overview: {movie.overview}")
-        self.episode_template_display.setText("Show: {show.title}<br>Genre(s): {show.genres}<br>{show.overview}<br>Subtitle for: {episode.number}<br>Episode Overview: {episode.overview}")
+        self.settings["tmdb_movie_template"] = "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}"
+        self.settings["tmdb_episode_template"] = "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}"
+        self._update_movie_template_display()
+        self._update_episode_template_display()
                 
         cleanup_defaults = {
             "cleanup_audio_on_success": True,
@@ -1924,6 +1934,8 @@ class SettingsDialog(CustomFramelessDialog):
             s[key] = checkbox.isChecked()
         
         s["use_tmdb"] = self.tmdb_checkbox.isChecked()
+        s["tmdb_movie_template"] = self.settings.get("tmdb_movie_template", "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}")
+        s["tmdb_episode_template"] = self.settings.get("tmdb_episode_template", "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}")
             
         for key, checkbox in self.cleanup_checkboxes.items():
             s[key] = checkbox.isChecked()
@@ -3990,9 +4002,9 @@ class MainWindow(FramelessWidget):
         try:
             self.settings["gemini_api_key"] = self.api_key_edit.text()
             self.settings["gemini_api_key2"] = self.api_key2_edit.text()
+            self.settings["tmdb_api_key"] = self.tmdb_api_key_edit.text()
             self.settings["model_name"] = self.model_name_edit.text()
             self.settings["selected_languages"] = self.selected_languages
-            self.settings["tmdb_api_key"] = self.tmdb_api_key_edit.text()
             
             config_dir = os.path.dirname(CONFIG_FILE)
             if not os.path.exists(config_dir):
