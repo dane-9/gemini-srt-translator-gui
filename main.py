@@ -174,9 +174,11 @@ DEFAULT_SETTINGS = {
     "update_existing_queue_languages": False,
     "queue_on_exit": "clear_if_translated",
     "existing_file_handling": "skip",
-    "auto_tmdb_lookup": True,
     "use_gst_parameters": False,
     "use_model_tuning": False,
+    "use_tmdb": False,
+    "tmdb_movie_template": "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}",
+    "tmdb_episode_template": "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}",
     "description": "", 
     "batch_size": 300,
     "free_quota": True, 
@@ -1516,9 +1518,14 @@ class SettingsDialog(CustomFramelessDialog):
         model_item.setIcon(load_svg(get_resource_path("Files/model-tuning.svg"), "#A0A0A0"))
         model_item.setEditable(False)
         
+        tmdb_item = QStandardItem("TMDB")
+        tmdb_item.setIcon(load_svg(get_resource_path("Files/cog-box.svg"), "#A0A0A0"))
+        tmdb_item.setEditable(False)
+        
         self.tree_model.appendRow(basic_item)
         self.tree_model.appendRow(gst_item)
         self.tree_model.appendRow(model_item)
+        self.tree_model.appendRow(tmdb_item)
         
         self.category_tree.setModel(self.tree_model)
         self.category_tree.selectionModel().currentChanged.connect(self.on_category_changed)
@@ -1530,10 +1537,12 @@ class SettingsDialog(CustomFramelessDialog):
         self.basic_page = self._build_basic_page()
         self.gst_page = self._build_gst_page()
         self.model_page = self._build_model_page()
+        self.tmdb_page = self._build_tmdb_page()
         
         self.pages_widget.addWidget(self.basic_page)
         self.pages_widget.addWidget(self.gst_page)
         self.pages_widget.addWidget(self.model_page)
+        self.pages_widget.addWidget(self.tmdb_page)
         
         main_layout.addWidget(self.pages_widget)
         layout.addLayout(main_layout)
@@ -1597,11 +1606,6 @@ class SettingsDialog(CustomFramelessDialog):
         self.update_queue_languages_checkbox.setChecked(self.settings.get("update_existing_queue_languages", True))
         self.update_queue_languages_checkbox.setToolTip("When enabled, changing the language selection will update all existing queue items that match the previous selection")
         main_layout.addWidget(self.update_queue_languages_checkbox)
-        
-        self.auto_tmdb_lookup_checkbox = QCheckBox("Auto-populate descriptions from TMDB")
-        self.auto_tmdb_lookup_checkbox.setChecked(self.settings.get("auto_tmdb_lookup", True))
-        self.auto_tmdb_lookup_checkbox.setToolTip("Automatically fetch movie/TV show information from TMDB when adding files")
-        main_layout.addWidget(self.auto_tmdb_lookup_checkbox)
         
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
@@ -1755,6 +1759,60 @@ class SettingsDialog(CustomFramelessDialog):
         
         return page
         
+    def _build_tmdb_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setSpacing(15)
+        
+        self.tmdb_checkbox = QCheckBox("Enable TMDB")
+        self.tmdb_checkbox.setChecked(self.settings.get("use_tmdb", False))
+        self.tmdb_checkbox.stateChanged.connect(self.toggle_tmdb_settings)
+        layout.addWidget(self.tmdb_checkbox)
+        
+        self.tmdb_content_widget = QWidget()
+        tmdb_layout = QVBoxLayout(self.tmdb_content_widget)
+        tmdb_layout.setContentsMargins(20, 0, 0, 0)
+        tmdb_layout.setSpacing(15)
+        
+        movie_section = QWidget()
+        movie_layout = QVBoxLayout(movie_section)
+        movie_layout.setContentsMargins(0, 0, 0, 0)
+        
+        movie_title = QLabel("Movie Template:")
+        movie_title.setStyleSheet("font-weight: bold;")
+        movie_layout.addWidget(movie_title)
+        
+        self.movie_template_display = QLabel()
+        self.movie_template_display.setWordWrap(True)
+        self.movie_template_display.setStyleSheet("background-color: #2a2a2a; padding: 10px; border-radius: 4px; font-family: monospace;")
+        self.movie_template_display.setText(self.settings.get("tmdb_movie_template", "").replace('\n', '<br>'))
+        movie_layout.addWidget(self.movie_template_display)
+        
+        tmdb_layout.addWidget(movie_section)
+        
+        episode_section = QWidget()
+        episode_layout = QVBoxLayout(episode_section)
+        episode_layout.setContentsMargins(0, 0, 0, 0)
+        
+        episode_title = QLabel("Episode Template:")
+        episode_title.setStyleSheet("font-weight: bold;")
+        episode_layout.addWidget(episode_title)
+        
+        self.episode_template_display = QLabel()
+        self.episode_template_display.setWordWrap(True)
+        self.episode_template_display.setStyleSheet("background-color: #2a2a2a; padding: 10px; border-radius: 4px; font-family: monospace;")
+        self.episode_template_display.setText(self.settings.get("tmdb_episode_template", "").replace('\n', '<br>'))
+        episode_layout.addWidget(self.episode_template_display)
+        
+        tmdb_layout.addWidget(episode_section)
+        
+        layout.addWidget(self.tmdb_content_widget)
+        layout.addStretch()
+        
+        self.toggle_tmdb_settings(self.tmdb_checkbox.isChecked())
+        
+        return page
+        
     def toggle_thinking_budget(self, enabled):
         self.thinking_budget_widget.setEnabled(enabled)
         if not enabled:
@@ -1782,13 +1840,19 @@ class SettingsDialog(CustomFramelessDialog):
             self.model_content_widget.setStyleSheet("")
             if hasattr(self, 'model_checkboxes') and 'thinking' in self.model_checkboxes:
                 self.toggle_thinking_budget(self.model_checkboxes["thinking"].isChecked())
+                
+    def toggle_tmdb_settings(self, enabled):
+        self.tmdb_content_widget.setEnabled(enabled)
+        if not enabled:
+            self.tmdb_content_widget.setStyleSheet("color: grey;")
+        else:
+            self.tmdb_content_widget.setStyleSheet("")
     
     def reset_defaults(self):
         self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
         self.queue_on_exit_combo.setCurrentIndex(1)
         self.existing_file_combo.setCurrentIndex(0)
         self.update_queue_languages_checkbox.setChecked(False)
-        self.auto_tmdb_lookup_checkbox.setChecked(True)
         
         self.gst_checkbox.setChecked(False)
         self.batch_size_spin.setValue(30)
@@ -1816,6 +1880,10 @@ class SettingsDialog(CustomFramelessDialog):
         for key, default_val in model_defaults.items():
             if key in self.model_checkboxes:
                 self.model_checkboxes[key].setChecked(default_val)
+        
+        self.tmdb_checkbox.setChecked(False)
+        self.movie_template_display.setText("Movie: {movie.title}<br>Released: {movie.year}<br>Genre(s): {movie.genres}<br>Overview: {movie.overview}")
+        self.episode_template_display.setText("Show: {show.title}<br>Genre(s): {show.genres}<br>{show.overview}<br>Subtitle for: {episode.number}<br>Episode Overview: {episode.overview}")
                 
         cleanup_defaults = {
             "cleanup_audio_on_success": True,
@@ -1830,6 +1898,7 @@ class SettingsDialog(CustomFramelessDialog):
         
         self.toggle_gst_settings(False)
         self.toggle_model_settings(False)
+        self.toggle_tmdb_settings(False)
     
     def get_settings(self):
         s = self.settings.copy()
@@ -1838,7 +1907,6 @@ class SettingsDialog(CustomFramelessDialog):
         s["queue_on_exit"] = self.queue_on_exit_combo.currentData()
         s["existing_file_handling"] = self.existing_file_combo.currentData()
         s["update_existing_queue_languages"] = self.update_queue_languages_checkbox.isChecked()
-        s["auto_tmdb_lookup"] = self.auto_tmdb_lookup_checkbox.isChecked()
         
         s["use_gst_parameters"] = self.gst_checkbox.isChecked()
         s["batch_size"] = self.batch_size_spin.value()
@@ -1854,6 +1922,8 @@ class SettingsDialog(CustomFramelessDialog):
         
         for key, checkbox in self.model_checkboxes.items():
             s[key] = checkbox.isChecked()
+        
+        s["use_tmdb"] = self.tmdb_checkbox.isChecked()
             
         for key, checkbox in self.cleanup_checkboxes.items():
             s[key] = checkbox.isChecked()
@@ -3576,6 +3646,12 @@ class MainWindow(FramelessWidget):
         edit_languages_action.triggered.connect(self.edit_selected_languages)
         menu.addAction(edit_languages_action)
         
+        if self.settings.get("use_tmdb", False) and self.tmdb_api_key_edit.text().strip():
+            menu.addSeparator()
+            refresh_tmdb_action = QAction("Refresh TMDB Info", self)
+            refresh_tmdb_action.triggered.connect(self.refresh_tmdb_info)
+            menu.addAction(refresh_tmdb_action)
+        
         if menu.actions():
             menu.addSeparator()
         
@@ -3596,12 +3672,6 @@ class MainWindow(FramelessWidget):
         menu.addAction(move_to_bottom_action)
         
         menu.addSeparator()
-        
-        if self.settings.get("auto_tmdb_lookup", True) and self.tmdb_api_key_edit.text().strip():
-            menu.addSeparator()
-            refresh_tmdb_action = QAction("Refresh TMDB Info", self)
-            refresh_tmdb_action.triggered.connect(self.refresh_tmdb_info)
-            menu.addAction(refresh_tmdb_action)
         
         remove_action = QAction("Remove", self)
         remove_action.triggered.connect(self.remove_selected_items)
@@ -4704,7 +4774,7 @@ class MainWindow(FramelessWidget):
     def _start_tmdb_lookup(self, file_path, force=False):
         api_key = self.tmdb_api_key_edit.text().strip()
         
-        if not api_key or not self.settings.get("auto_tmdb_lookup", True):
+        if not api_key or not self.settings.get("use_tmdb", False):
             return
         
         task = None
