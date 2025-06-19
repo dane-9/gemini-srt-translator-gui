@@ -8,6 +8,7 @@ import time
 import argparse
 import queue
 import threading
+import requests
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
@@ -165,6 +166,7 @@ CONFIG_FILE = get_persistent_path(os.path.join("Files", "config.json"))
 DEFAULT_SETTINGS = {
     "gemini_api_key": "", 
     "gemini_api_key2": "", 
+    "tmdb_api_key": "",
     "target_language": "English",
     "selected_languages": ["en"],
     "model_name": "gemini-2.5-flash",
@@ -172,6 +174,7 @@ DEFAULT_SETTINGS = {
     "update_existing_queue_languages": False,
     "queue_on_exit": "clear_if_translated",
     "existing_file_handling": "skip",
+    "auto_tmdb_lookup": True,
     "use_gst_parameters": False,
     "use_model_tuning": False,
     "description": "", 
@@ -609,6 +612,174 @@ class IconTextDelegate(QStyledItemDelegate):
         icon_y = option.rect.top() + (option.rect.height() - icon_size) // 2
         icon_rect = QRect(icon_x, icon_y, icon_size, icon_size)
         config['icon'].paint(painter, icon_rect)
+        
+class TMDBLookupWorker(QObject):
+    finished = Signal(str, str, bool)
+    status_update = Signal(str, str)
+    
+    def __init__(self, file_path, api_key):
+        super().__init__()
+        self.file_path = file_path
+        self.api_key = api_key
+        self.base_url = "https://api.themoviedb.org/3"
+        
+    def run(self):
+        try:
+            self.status_update.emit(self.file_path, "Fetching TMDB info...")
+            
+            parsed_info = self._parse_filename(self.file_path)
+            if not parsed_info:
+                self.finished.emit(self.file_path, "", False)
+                return
+                
+            description = ""
+            if parsed_info['type'] == 'movie':
+                description = self._lookup_movie(parsed_info['title'], parsed_info.get('year'))
+            elif parsed_info['type'] == 'episode':
+                description = self._lookup_episode(parsed_info['show_title'], parsed_info['season'], parsed_info['episode'])
+                
+            self.finished.emit(self.file_path, description, bool(description))
+            
+        except Exception as e:
+            self.finished.emit(self.file_path, "", False)
+    
+    def _parse_filename(self, file_path):
+        basename = os.path.basename(file_path)
+        
+        if is_video_file(file_path):
+            name_without_ext = os.path.splitext(basename)[0]
+        else:
+            subtitle_parsed = _parse_subtitle_filename(basename)
+            if subtitle_parsed and subtitle_parsed['base_name']:
+                name_without_ext = subtitle_parsed['base_name']
+            else:
+                name_without_ext = _strip_language_codes_from_name(os.path.splitext(basename)[0])
+        
+        episode_pattern = r'^(.+?)[.\s-]+[Ss](\d{1,2})[Ee](\d{1,2})'
+        episode_match = re.search(episode_pattern, name_without_ext)
+        
+        if episode_match:
+            show_title = re.sub(r'[._-]', ' ', episode_match.group(1)).strip()
+            season = int(episode_match.group(2))
+            episode = int(episode_match.group(3))
+            return {
+                'type': 'episode',
+                'show_title': show_title,
+                'season': season,
+                'episode': episode
+            }
+        
+        movie_pattern = r'^(.+?)[.\s-]*(?:\((\d{4})\)|(\d{4})).*$'
+        movie_match = re.search(movie_pattern, name_without_ext)
+        
+        if movie_match:
+            title = re.sub(r'[._-]', ' ', movie_match.group(1)).strip()
+            year = movie_match.group(2) or movie_match.group(3)
+            return {
+                'type': 'movie',
+                'title': title,
+                'year': int(year) if year else None
+            }
+        
+        title = re.sub(r'[._-]', ' ', name_without_ext).strip()
+        return {
+            'type': 'movie',
+            'title': title,
+            'year': None
+        }
+    
+    def _make_request(self, endpoint, params=None, retries=3):
+        if not params:
+            params = {}
+        params['api_key'] = self.api_key
+        
+        for attempt in range(retries):
+            try:
+                response = requests.get(f"{self.base_url}/{endpoint}", params=params, timeout=10)
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 429:
+                    time.sleep(10)
+                    continue
+                else:
+                    break
+            except requests.RequestException:
+                if attempt < retries - 1:
+                    time.sleep(2)
+                    continue
+                break
+        
+        return None
+    
+    def _lookup_movie(self, title, year=None):
+        search_params = {'query': title}
+        if year:
+            search_params['year'] = year
+            
+        search_result = self._make_request('search/movie', search_params)
+        if not search_result or not search_result.get('results'):
+            if year:
+                search_result = self._make_request('search/movie', {'query': title})
+                if not search_result or not search_result.get('results'):
+                    return ""
+            else:
+                return ""
+        
+        movie_id = search_result['results'][0]['id']
+        movie_details = self._make_request(f'movie/{movie_id}')
+        
+        if not movie_details:
+            return ""
+        
+        title = movie_details.get('title', '')
+        genres = [g['name'] for g in movie_details.get('genres', [])]
+        genre_str = '/'.join(genres) if genres else 'Unknown'
+        release_date = movie_details.get('release_date', '')
+        year = release_date[:4] if release_date else 'Unknown'
+        overview = movie_details.get('overview', '')
+        
+        return f"{title} - {genre_str} ({year}): {overview}"
+    
+    def _lookup_episode(self, show_title, season, episode):
+        search_result = self._make_request('search/tv', {'query': show_title})
+        if not search_result or not search_result.get('results'):
+            return ""
+        
+        tv_id = search_result['results'][0]['id']
+        tv_details = self._make_request(f'tv/{tv_id}')
+        
+        if not tv_details:
+            return ""
+        
+        episode_details = self._make_request(f'tv/{tv_id}/season/{season}/episode/{episode}')
+        
+        if not episode_details:
+            return ""
+        
+        show_name = tv_details.get('name', '')
+        show_overview = tv_details.get('overview', '')
+        episode_name = episode_details.get('name', '')
+        episode_overview = episode_details.get('overview', '')
+        
+        season_str = f"S{season:02d}E{episode:02d}"
+        if episode_name:
+            season_str += f' "{episode_name}"'
+        
+        return f'{show_name} - {show_overview} {season_str}: {episode_overview}'
+
+def _validate_tmdb_api_key(api_key):
+    if not api_key or len(api_key.strip()) < 30:
+        return False
+    
+    try:
+        response = requests.get(
+            f"https://api.themoviedb.org/3/configuration",
+            params={'api_key': api_key.strip()},
+            timeout=5
+        )
+        return response.status_code == 200
+    except:
+        return False
 
 class QueueStateManager:
     def __init__(self, queue_file_path):
@@ -1427,6 +1598,11 @@ class SettingsDialog(CustomFramelessDialog):
         self.update_queue_languages_checkbox.setToolTip("When enabled, changing the language selection will update all existing queue items that match the previous selection")
         main_layout.addWidget(self.update_queue_languages_checkbox)
         
+        self.auto_tmdb_lookup_checkbox = QCheckBox("Auto-populate descriptions from TMDB")
+        self.auto_tmdb_lookup_checkbox.setChecked(self.settings.get("auto_tmdb_lookup", True))
+        self.auto_tmdb_lookup_checkbox.setToolTip("Automatically fetch movie/TV show information from TMDB when adding files")
+        main_layout.addWidget(self.auto_tmdb_lookup_checkbox)
+        
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         main_layout.addWidget(separator)
@@ -1612,6 +1788,7 @@ class SettingsDialog(CustomFramelessDialog):
         self.queue_on_exit_combo.setCurrentIndex(1)
         self.existing_file_combo.setCurrentIndex(0)
         self.update_queue_languages_checkbox.setChecked(False)
+        self.auto_tmdb_lookup_checkbox.setChecked(True)
         
         self.gst_checkbox.setChecked(False)
         self.batch_size_spin.setValue(30)
@@ -1661,6 +1838,7 @@ class SettingsDialog(CustomFramelessDialog):
         s["queue_on_exit"] = self.queue_on_exit_combo.currentData()
         s["existing_file_handling"] = self.existing_file_combo.currentData()
         s["update_existing_queue_languages"] = self.update_queue_languages_checkbox.isChecked()
+        s["auto_tmdb_lookup"] = self.auto_tmdb_lookup_checkbox.isChecked()
         
         s["use_gst_parameters"] = self.gst_checkbox.isChecked()
         s["batch_size"] = self.batch_size_spin.value()
@@ -2877,6 +3055,11 @@ class MainWindow(FramelessWidget):
         self.last_validated_key1 = ""
         self.last_validated_key2 = ""
         
+        self.tmdb_lookup_workers = {}
+        self.tmdb_threads = {}
+        self.tmdb_api_key_validated = False
+        self.last_validated_tmdb_key = ""
+        
         title_bar = self.getTitleBar()
         title_bar.setTitleBarFont(QFont('Arial', 12))
         title_bar.setIconSize(24, 24)
@@ -2919,6 +3102,14 @@ class MainWindow(FramelessWidget):
         self.api_key2_edit.setText(self.settings.get("gemini_api_key2", ""))
         self.api_key2_edit.textChanged.connect(self.on_api_key2_changed)
         api_keys_model_layout.addWidget(self.api_key2_edit)
+        
+        self.tmdb_api_key_edit = CustomLineEdit()
+        self.tmdb_api_key_edit.setPlaceholderText("Enter TMDB API Key (optional)")
+        self.tmdb_api_key_edit.set_right_text("TMDB API Key", font_size=9, italic=False, color="#555555")
+        self.tmdb_api_key_edit.setEchoMode(QLineEdit.Password)
+        self.tmdb_api_key_edit.setText(self.settings.get("tmdb_api_key", ""))
+        self.tmdb_api_key_edit.textChanged.connect(self.on_tmdb_api_key_changed)
+        api_keys_model_layout.addWidget(self.tmdb_api_key_edit)
         
         self.model_name_edit = CustomLineEdit()
         self.model_name_edit.setText(self.settings.get("model_name", "gemini-2.5-flash"))
@@ -3406,6 +3597,12 @@ class MainWindow(FramelessWidget):
         
         menu.addSeparator()
         
+        if self.settings.get("auto_tmdb_lookup", True) and self.tmdb_api_key_edit.text().strip():
+            menu.addSeparator()
+            refresh_tmdb_action = QAction("Refresh TMDB Info", self)
+            refresh_tmdb_action.triggered.connect(self.refresh_tmdb_info)
+            menu.addAction(refresh_tmdb_action)
+        
         remove_action = QAction("Remove", self)
         remove_action.triggered.connect(self.remove_selected_items)
         menu.addAction(remove_action)
@@ -3725,6 +3922,7 @@ class MainWindow(FramelessWidget):
             self.settings["gemini_api_key2"] = self.api_key2_edit.text()
             self.settings["model_name"] = self.model_name_edit.text()
             self.settings["selected_languages"] = self.selected_languages
+            self.settings["tmdb_api_key"] = self.tmdb_api_key_edit.text()
             
             config_dir = os.path.dirname(CONFIG_FILE)
             if not os.path.exists(config_dir):
@@ -3875,6 +4073,9 @@ class MainWindow(FramelessWidget):
                 )
                 
                 self._add_task_to_ui(primary_file, self.selected_languages.copy(), "", task_info['task_type'])
+                
+                video_file_for_lookup = task_info.get('video_file', primary_file)
+                self._start_tmdb_lookup(video_file_for_lookup if video_file_for_lookup != primary_file else primary_file)
             
             self.update_button_states()
 
@@ -4096,6 +4297,7 @@ class MainWindow(FramelessWidget):
         has_work_remaining = self.queue_manager.has_any_work_remaining()
         is_processing = self.active_thread is not None and self.active_thread.isRunning()
         has_any_tasks = len(self.tasks) > 0
+        has_tmdb_operations = bool(self.tmdb_lookup_workers)
         
         key_status = self.validate_both_api_keys()
         
@@ -4105,6 +4307,9 @@ class MainWindow(FramelessWidget):
         elif self.is_running or is_processing:
             self.start_stop_btn.setText("Stop After Current Language")  
             self.start_stop_btn.setEnabled(True)
+        elif has_tmdb_operations:
+            self.start_stop_btn.setText("Fetching TMDB Info...")
+            self.start_stop_btn.setEnabled(False)
         else:
             if not key_status['key1_provided']:
                 self.start_stop_btn.setText("Missing Primary API Key")
@@ -4119,7 +4324,7 @@ class MainWindow(FramelessWidget):
                 self.start_stop_btn.setText("Start Translating")
                 self.start_stop_btn.setEnabled(has_work_remaining)
         
-        is_busy = is_processing or self.is_running
+        is_busy = is_processing or self.is_running or has_tmdb_operations
         
         self.clear_btn.setEnabled(has_any_tasks and not is_busy)
         self.custom_title_bar.language_selection_btn.setEnabled(not is_busy)
@@ -4483,6 +4688,109 @@ class MainWindow(FramelessWidget):
         self.api_key2_validated = False
         self.settings.update({"gemini_api_key2": self.api_key2_edit.text()})
         self.update_button_states()
+        
+    def refresh_tmdb_info(self):
+        selected_rows = self._get_selected_task_rows()
+        api_key = self.tmdb_api_key_edit.text().strip()
+        
+        if not api_key:
+            return
+        
+        for row in selected_rows:
+            if 0 <= row < len(self.tasks):
+                task_path = self.tasks[row]["path"]
+                self._start_tmdb_lookup(task_path, force=True)
+    
+    def _start_tmdb_lookup(self, file_path, force=False):
+        api_key = self.tmdb_api_key_edit.text().strip()
+        
+        if not api_key or not self.settings.get("auto_tmdb_lookup", True):
+            return
+        
+        task = None
+        for t in self.tasks:
+            if t["path"] == file_path:
+                task = t
+                break
+        
+        if not task:
+            return
+        
+        if not force and task["description"]:
+            return
+        
+        if file_path in self.tmdb_lookup_workers:
+            return
+        
+        worker = TMDBLookupWorker(file_path, api_key)
+        thread = QThread(self)
+        
+        worker.moveToThread(thread)
+        worker.status_update.connect(self._on_tmdb_status_update)
+        worker.finished.connect(self._on_tmdb_finished)
+        thread.started.connect(worker.run)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        
+        self.tmdb_lookup_workers[file_path] = worker
+        self.tmdb_threads[file_path] = thread
+        
+        thread.start()
+        self.update_button_states()
+    
+    def _on_tmdb_status_update(self, file_path, status):
+        for task in self.tasks:
+            if task["path"] == file_path:
+                task["status_item"].setText(status)
+                break
+    
+    def _on_tmdb_finished(self, file_path, description, success):
+        if file_path in self.tmdb_lookup_workers:
+            del self.tmdb_lookup_workers[file_path]
+        
+        if file_path in self.tmdb_threads:
+            thread = self.tmdb_threads[file_path]
+            if thread.isRunning():
+                thread.quit()
+                thread.wait()
+            del self.tmdb_threads[file_path]
+        
+        for task in self.tasks:
+            if task["path"] == file_path:
+                if success and description:
+                    task["description"] = description
+                    task["desc_item"].setText(description)
+                    task["desc_item"].setToolTip(description)
+                    
+                    if file_path in self.queue_manager.state["queue_state"]:
+                        self.queue_manager.state["queue_state"][file_path]["description"] = description
+                        self.queue_manager.state["queue_state"][file_path]["tmdb_info"] = description
+                        self.queue_manager._save_queue_state()
+                
+                task["status_item"].setText("Queued")
+                break
+        
+        self.update_button_states()
+        
+    def on_tmdb_api_key_changed(self):
+        self.tmdb_api_key_validated = False
+        self.settings.update({"tmdb_api_key": self.tmdb_api_key_edit.text()})
+    
+    def validate_tmdb_api_key_cached(self, api_key):
+        if api_key == self.last_validated_tmdb_key and self.tmdb_api_key_validated:
+            return True
+        
+        if not api_key.strip():
+            self.tmdb_api_key_validated = True
+            self.last_validated_tmdb_key = api_key
+            return True
+        
+        is_valid = _validate_tmdb_api_key(api_key)
+        self.tmdb_api_key_validated = is_valid
+        if is_valid:
+            self.last_validated_tmdb_key = api_key
+        
+        return is_valid
 
 if __name__ == "__main__":
     if "--run-gst-subprocess" in sys.argv:
