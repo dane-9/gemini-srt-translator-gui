@@ -774,12 +774,35 @@ class TMDBLookupWorker(QObject):
         return self._apply_template(self.episode_template, episode_data)
     
     def _apply_template(self, template, data):
-        result = template
-        for key, value in data.items():
-            if value:
-                result = result.replace(f'{{{key}}}', str(value))
+        lines = template.split('\n')
+        result_lines = []
         
-        return result
+        for line in lines:
+            template_vars = re.findall(r'\{([^}]+)\}', line)
+            
+            if not template_vars:
+                result_lines.append(line)
+                continue
+            
+            has_missing_data = False
+            processed_line = line
+            
+            for var in template_vars:
+                value = data.get(var, '')
+                if not value or value.strip() == '':
+                    has_missing_data = True
+                    break
+            
+            if has_missing_data:
+                continue
+            
+            for var in template_vars:
+                value = data.get(var, '')
+                processed_line = processed_line.replace(f'{{{var}}}', str(value))
+            
+            result_lines.append(processed_line)
+        
+        return '\n'.join(result_lines)
 
 def _validate_tmdb_api_key(api_key):
     if not api_key or len(api_key.strip()) < 30:
