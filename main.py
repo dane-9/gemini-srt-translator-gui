@@ -1778,9 +1778,18 @@ class SettingsDialog(CustomFramelessDialog):
         movie_layout = QVBoxLayout(movie_section)
         movie_layout.setContentsMargins(0, 0, 0, 0)
         
+        movie_header = QHBoxLayout()
         movie_title = QLabel("Movie Template:")
         movie_title.setStyleSheet("font-weight: bold;")
-        movie_layout.addWidget(movie_title)
+        movie_header.addWidget(movie_title)
+        
+        movie_header.addStretch()
+        
+        self.edit_movie_btn = QPushButton("Edit Movie Template")
+        self.edit_movie_btn.clicked.connect(self.edit_movie_template)
+        movie_header.addWidget(self.edit_movie_btn)
+        
+        movie_layout.addLayout(movie_header)
         
         self.movie_template_display = QLabel()
         self.movie_template_display.setWordWrap(True)
@@ -1794,9 +1803,18 @@ class SettingsDialog(CustomFramelessDialog):
         episode_layout = QVBoxLayout(episode_section)
         episode_layout.setContentsMargins(0, 0, 0, 0)
         
+        episode_header = QHBoxLayout()
         episode_title = QLabel("Episode Template:")
         episode_title.setStyleSheet("font-weight: bold;")
-        episode_layout.addWidget(episode_title)
+        episode_header.addWidget(episode_title)
+        
+        episode_header.addStretch()
+        
+        self.edit_episode_btn = QPushButton("Edit Episode Template")
+        self.edit_episode_btn.clicked.connect(self.edit_episode_template)
+        episode_header.addWidget(self.edit_episode_btn)
+        
+        episode_layout.addLayout(episode_header)
         
         self.episode_template_display = QLabel()
         self.episode_template_display.setWordWrap(True)
@@ -1847,6 +1865,22 @@ class SettingsDialog(CustomFramelessDialog):
             self.tmdb_content_widget.setStyleSheet("color: grey;")
         else:
             self.tmdb_content_widget.setStyleSheet("")
+            
+    def edit_movie_template(self):
+        current_template = self.settings.get("tmdb_movie_template", "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}")
+        dialog = TemplateEditorDialog("movie", current_template, self)
+        if dialog.exec():
+            new_template = dialog.get_template()
+            self.settings["tmdb_movie_template"] = new_template
+            self._update_movie_template_display()
+    
+    def edit_episode_template(self):
+        current_template = self.settings.get("tmdb_episode_template", "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}")
+        dialog = TemplateEditorDialog("episode", current_template, self)
+        if dialog.exec():
+            new_template = dialog.get_template()
+            self.settings["tmdb_episode_template"] = new_template
+            self._update_episode_template_display()
             
     def _update_movie_template_display(self):
         template = self.settings.get("tmdb_movie_template", "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}")
@@ -1941,6 +1975,88 @@ class SettingsDialog(CustomFramelessDialog):
             s[key] = checkbox.isChecked()
         
         return s
+        
+class TemplateEditorDialog(CustomFramelessDialog):
+    def __init__(self, template_type, current_template="", parent=None):
+        title = f"Edit {template_type.title()} Template"
+        super().__init__(title, parent)
+        self.setMinimumSize(600, 500)
+        self.template_type = template_type
+        
+        layout = self.get_content_layout()
+        
+        main_layout = QHBoxLayout()
+        
+        left_layout = QVBoxLayout()
+        
+        template_label = QLabel("Template:")
+        template_label.setStyleSheet("font-weight: bold;")
+        left_layout.addWidget(template_label)
+        
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlainText(current_template)
+        self.text_edit.textChanged.connect(self.update_preview)
+        left_layout.addWidget(self.text_edit)
+        
+        main_layout.addLayout(left_layout)
+        
+        right_layout = QVBoxLayout()
+        
+        preview_label = QLabel("Preview:")
+        preview_label.setStyleSheet("font-weight: bold;")
+        right_layout.addWidget(preview_label)
+        
+        self.preview_area = QLabel()
+        self.preview_area.setWordWrap(True)
+        self.preview_area.setStyleSheet("background-color: #2a2a2a; padding: 15px; border-radius: 4px; font-family: Arial;")
+        self.preview_area.setAlignment(Qt.AlignTop)
+        self.preview_area.setMinimumWidth(250)
+        right_layout.addWidget(self.preview_area)
+        
+        main_layout.addLayout(right_layout)
+        
+        layout.addLayout(main_layout)
+        
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+        
+        self.update_preview()
+    
+    def update_preview(self):
+        template = self.text_edit.toPlainText()
+        preview_text = self._generate_preview(template)
+        self.preview_area.setText(preview_text)
+    
+    def _generate_preview(self, template):
+        if self.template_type == "movie":
+            sample_data = {
+                'movie.title': 'Interstellar',
+                'movie.year': '2014',
+                'movie.genres': 'Sci-Fi/Adventure',
+                'movie.genre': 'Sci-Fi',
+                'movie.overview': 'A team of explorers travel through a wormhole in space in attempt to ensure humanity\'s survival.'
+            }
+        else:
+            sample_data = {
+                'show.title': 'Friends',
+                'show.overview': 'Six friends navigate life and love in New York City.',
+                'show.genres': 'Comedy/Romance',
+                'show.genre': 'Comedy',
+                'episode.title': 'The One Where Rachel Finds Out',
+                'episode.number': 'S01E24',
+                'episode.overview': 'Rachel finds out Ross is in love with her when she overhears a message he left on her answering machine.'
+            }
+        
+        preview = template
+        for key, value in sample_data.items():
+            preview = preview.replace(f'{{{key}}}', value)
+        
+        return preview
+    
+    def get_template(self):
+        return self.text_edit.toPlainText()
 
 class LanguageSelectionDialog(CustomFramelessDialog):
     def __init__(self, selected_languages=None, parent=None):
