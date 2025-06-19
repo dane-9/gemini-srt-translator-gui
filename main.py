@@ -3786,7 +3786,6 @@ class MainWindow(FramelessWidget):
                     pass
         
         if queue_on_exit == "clear":
-            self._cleanup_all_task_files()
             self.queue_manager.clear_all_state()
         elif queue_on_exit == "clear_if_translated":
             all_translated = True
@@ -3797,7 +3796,6 @@ class MainWindow(FramelessWidget):
                     break
             
             if all_translated:
-                self._cleanup_all_task_files()
                 self.queue_manager.clear_all_state()
 
     def add_files_action(self):
