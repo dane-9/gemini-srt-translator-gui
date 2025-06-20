@@ -177,8 +177,8 @@ DEFAULT_SETTINGS = {
     "use_gst_parameters": False,
     "use_model_tuning": False,
     "use_tmdb": False,
-    "tmdb_movie_template": "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}",
-    "tmdb_episode_template": "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}",
+    "tmdb_movie_template": "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}",
+    "tmdb_episode_template": "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}",
     "description": "", 
     "batch_size": 300,
     "free_quota": True, 
@@ -1902,7 +1902,7 @@ class SettingsDialog(CustomFramelessDialog):
             self.tmdb_content_widget.setStyleSheet("")
             
     def edit_movie_template(self):
-        current_template = self.settings.get("tmdb_movie_template", "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}")
+        current_template = self.settings.get("tmdb_movie_template", "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}")
         dialog = TemplateEditorDialog("movie", current_template, self)
         if dialog.exec():
             new_template = dialog.get_template()
@@ -1910,7 +1910,7 @@ class SettingsDialog(CustomFramelessDialog):
             self._update_movie_template_display()
     
     def edit_episode_template(self):
-        current_template = self.settings.get("tmdb_episode_template", "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}")
+        current_template = self.settings.get("tmdb_episode_template", "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}")
         dialog = TemplateEditorDialog("episode", current_template, self)
         if dialog.exec():
             new_template = dialog.get_template()
@@ -1918,11 +1918,11 @@ class SettingsDialog(CustomFramelessDialog):
             self._update_episode_template_display()
             
     def _update_movie_template_display(self):
-        template = self.settings.get("tmdb_movie_template", "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}")
+        template = self.settings.get("tmdb_movie_template", "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}")
         self.movie_template_display.setText(template.replace('\n', '<br>'))
     
     def _update_episode_template_display(self):
-        template = self.settings.get("tmdb_episode_template", "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}")
+        template = self.settings.get("tmdb_episode_template", "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}")
         self.episode_template_display.setText(template.replace('\n', '<br>'))
     
     def reset_defaults(self):
@@ -1959,8 +1959,8 @@ class SettingsDialog(CustomFramelessDialog):
                 self.model_checkboxes[key].setChecked(default_val)
         
         self.tmdb_checkbox.setChecked(False)
-        self.settings["tmdb_movie_template"] = "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}"
-        self.settings["tmdb_episode_template"] = "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}"
+        self.settings["tmdb_movie_template"] = "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}"
+        self.settings["tmdb_episode_template"] = "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}"
         self._update_movie_template_display()
         self._update_episode_template_display()
                 
@@ -2003,8 +2003,8 @@ class SettingsDialog(CustomFramelessDialog):
             s[key] = checkbox.isChecked()
         
         s["use_tmdb"] = self.tmdb_checkbox.isChecked()
-        s["tmdb_movie_template"] = self.settings.get("tmdb_movie_template", "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}")
-        s["tmdb_episode_template"] = self.settings.get("tmdb_episode_template", "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}")
+        s["tmdb_movie_template"] = self.settings.get("tmdb_movie_template", "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}")
+        s["tmdb_episode_template"] = self.settings.get("tmdb_episode_template", "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}")
             
         for key, checkbox in self.cleanup_checkboxes.items():
             s[key] = checkbox.isChecked()
@@ -5078,8 +5078,8 @@ class MainWindow(FramelessWidget):
         if file_path in self.tmdb_lookup_workers:
             return
         
-        movie_template = self.settings.get("tmdb_movie_template", "Movie: {movie.title}\nReleased: {movie.year}\nGenre(s): {movie.genres}\nOverview: {movie.overview}")
-        episode_template = self.settings.get("tmdb_episode_template", "Show: {show.title}\nGenre(s): {show.genres}\n{show.overview}\nSubtitle for: {episode.number}\nEpisode Overview: {episode.overview}")
+        movie_template = self.settings.get("tmdb_movie_template", "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}")
+        episode_template = self.settings.get("tmdb_episode_template", "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}")
         
         worker = TMDBLookupWorker(file_path, api_key, movie_template, episode_template)
         thread = QThread(self)
@@ -5162,14 +5162,20 @@ class MainWindow(FramelessWidget):
             return ""
         
         lines = description.split('\n')
-        for line in lines:
-            line = line.strip()
-            if line.startswith('Movie: '):
-                return line[7:].strip()
-            elif line.startswith('Show: '):
-                return line[6:].strip()
+        if len(lines) < 3:
+            return ""
         
-        return ""
+        title_line = lines[2].strip()
+        
+        if ' - ' in title_line:
+            parts = title_line.split(' - ')
+            if len(parts) >= 2:
+                if ' S' in parts[0] and 'E' in parts[0]:
+                    return parts[0].rsplit(' S', 1)[0].strip()
+                else:
+                    return parts[0].strip()
+        
+        return title_line
 
 if __name__ == "__main__":
     if "--run-gst-subprocess" in sys.argv:
