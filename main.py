@@ -1799,7 +1799,7 @@ class SettingsDialog(CustomFramelessDialog):
         layout = QVBoxLayout(page)
         layout.setSpacing(15)
         
-        self.tmdb_checkbox = QCheckBox("Enable TMDB")
+        self.tmdb_checkbox = QCheckBox("Use TMDB for automatic descriptions")
         self.tmdb_checkbox.setChecked(self.settings.get("use_tmdb", False))
         self.tmdb_checkbox.stateChanged.connect(self.toggle_tmdb_settings)
         layout.addWidget(self.tmdb_checkbox)
