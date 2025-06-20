@@ -2199,11 +2199,14 @@ class CustomTaskDelegate(QStyledItemDelegate):
         indicator_font.setPointSize(max(6, int(option.font.pointSize() * 0.7)))
         
         if index.column() == 2:
-            primary_text = str(index.data()) if index.data() else ""
+            full_text = str(index.data()) if index.data() else ""
+            primary_text = full_text.split('\n')[0] if full_text else ""
             
             indicator_text = ""
             if hasattr(index.model(), 'get_description_source'):
                 indicator_text = index.model().get_description_source(index)
+            
+            available_width = option.rect.width() - 16
             
             indicator_width = 0
             if indicator_text:
@@ -2211,13 +2214,32 @@ class CustomTaskDelegate(QStyledItemDelegate):
                 indicator_metrics = painter.fontMetrics()
                 indicator_width = indicator_metrics.horizontalAdvance(indicator_text) + 8
             
-            primary_rect = QRect(option.rect.left() + 4, option.rect.top(), 
-                               option.rect.width() - 8 - indicator_width, option.rect.height())
-            
             painter.setFont(primary_font)
-            painter.drawText(primary_rect, Qt.AlignLeft | Qt.AlignVCenter, primary_text)
+            text_metrics = painter.fontMetrics()
             
-            if indicator_text:
+            text_width_available = available_width - indicator_width
+            text_width_needed = text_metrics.horizontalAdvance(primary_text)
+            
+            display_text = primary_text
+            show_indicator = True
+            
+            if text_width_needed > text_width_available:
+                if text_width_available > 30:
+                    truncated_width = text_width_available - text_metrics.horizontalAdvance("...")
+                    display_text = text_metrics.elidedText(primary_text, Qt.ElideRight, truncated_width)
+                else:
+                    show_indicator = False
+                    text_width_available = available_width
+                    if text_width_needed > text_width_available:
+                        truncated_width = text_width_available - text_metrics.horizontalAdvance("...")
+                        display_text = text_metrics.elidedText(primary_text, Qt.ElideRight, truncated_width)
+            
+            primary_rect = QRect(option.rect.left() + 4, option.rect.top(), 
+                               text_width_available + 4, option.rect.height())
+            
+            painter.drawText(primary_rect, Qt.AlignLeft | Qt.AlignVCenter, display_text)
+            
+            if show_indicator and indicator_text:
                 indicator_rect = QRect(option.rect.right() - indicator_width, option.rect.top(),
                                      indicator_width - 4, option.rect.height())
                 painter.setFont(indicator_font)
