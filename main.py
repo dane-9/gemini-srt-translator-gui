@@ -2211,15 +2211,15 @@ class CustomTaskDelegate(QStyledItemDelegate):
                 indicator_metrics = painter.fontMetrics()
                 indicator_width = indicator_metrics.horizontalAdvance(indicator_text) + 8
             
-            primary_rect = QRect(option.rect.left() + 4, option.rect.top() + 2, 
-                               option.rect.width() - 8 - indicator_width, option.rect.height() // 2)
+            primary_rect = QRect(option.rect.left() + 4, option.rect.top(), 
+                               option.rect.width() - 8 - indicator_width, option.rect.height())
             
             painter.setFont(primary_font)
             painter.drawText(primary_rect, Qt.AlignLeft | Qt.AlignVCenter, primary_text)
             
             if indicator_text:
-                indicator_rect = QRect(option.rect.right() - indicator_width, option.rect.top() + 2,
-                                     indicator_width - 4, option.rect.height() // 2)
+                indicator_rect = QRect(option.rect.right() - indicator_width, option.rect.top(),
+                                     indicator_width - 4, option.rect.height())
                 painter.setFont(indicator_font)
                 painter.drawText(indicator_rect, Qt.AlignRight | Qt.AlignVCenter, indicator_text)
         
@@ -2244,7 +2244,7 @@ class CustomTaskDelegate(QStyledItemDelegate):
         
         else:
             primary_text = str(index.data()) if index.data() else ""
-            primary_rect = QRect(option.rect.left() + 4, option.rect.top() + 2, 
+            primary_rect = QRect(option.rect.left() + 4, option.rect.top(), 
                                option.rect.width() - 8, option.rect.height())
             
             painter.setFont(primary_font)
