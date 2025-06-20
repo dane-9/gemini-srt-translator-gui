@@ -1553,8 +1553,8 @@ class SettingsDialog(CustomFramelessDialog):
         model_item.setIcon(load_svg(get_resource_path("Files/model-tuning.svg"), "#A0A0A0"))
         model_item.setEditable(False)
         
-        tmdb_item = QStandardItem("TMDB")
-        tmdb_item.setIcon(load_svg(get_resource_path("Files/cog-box.svg"), "#A0A0A0"))
+        tmdb_item = QStandardItem("TMDB Configuration")
+        tmdb_item.setIcon(load_svg(get_resource_path("Files/tmdb.svg"), "#A0A0A0"))
         tmdb_item.setEditable(False)
         
         self.tree_model.appendRow(basic_item)
