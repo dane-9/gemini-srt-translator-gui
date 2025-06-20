@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QComboBox, QProgressBar, QDialog, QFormLayout,
     QSpinBox, QDoubleSpinBox, QCheckBox, QDialogButtonBox, QMenu, QTextEdit,
     QToolButton, QFrame, QStackedWidget, QStyle, QListWidget, QListWidgetItem,
-    QStyledItemDelegate
+    QStyledItemDelegate, QStyleOptionViewItem
 )
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap, QPainter, QLinearGradient, QColor, QPen, QFontMetrics
 from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QTimer, QItemSelectionModel, QRect, QModelIndex
@@ -2169,6 +2169,78 @@ class LanguageSelectionDialog(CustomFramelessDialog):
                 selected.append(lang_code)
         
         return selected
+        
+class CustomTaskDelegate(QStyledItemDelegate):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.row_height = 25
+    
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        if not index.parent().isValid():
+            size.setHeight(self.row_height)
+        return size
+    
+    def paint(self, painter, option, index):
+        if index.parent().isValid():
+            super().paint(painter, option, index)
+            return
+        
+        style = option.widget.style() if option.widget else QApplication.style()
+        style.drawPrimitive(QStyle.PE_PanelItemViewItem, option, painter, option.widget)
+        
+        painter.save()
+        
+        primary_font = option.font
+        secondary_font = QFont(option.font)
+        secondary_font.setPointSize(max(6, int(option.font.pointSize() * 0.8)))
+        
+        primary_text = str(index.data()) if index.data() else ""
+        
+        secondary_text = ""
+        if hasattr(index.model(), 'get_secondary_info'):
+            secondary_text = index.model().get_secondary_info(index)
+        
+        primary_rect = QRect(option.rect.left() + 4, option.rect.top() + 2, 
+                           option.rect.width() - 8, option.rect.height() // 2)
+        secondary_rect = QRect(option.rect.left() + 4, option.rect.top() + option.rect.height() // 2, 
+                             option.rect.width() - 8, option.rect.height() // 2)
+        
+        painter.setFont(primary_font)
+        painter.drawText(primary_rect, Qt.AlignLeft | Qt.AlignVCenter, primary_text)
+        
+        if secondary_text:
+            painter.setFont(secondary_font)
+            painter.drawText(secondary_rect, Qt.AlignLeft | Qt.AlignVCenter, secondary_text)
+        
+        painter.restore()
+
+class CustomTaskModel(QStandardItemModel):
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+    
+    def get_secondary_info(self, index):
+        if index.column() != 0:
+            return ""
+        
+        row = index.row()
+        if row < len(self.main_window.tasks):
+            task = self.main_window.tasks[row]
+            task_type = task.get("task_type", "subtitle")
+            languages = task.get("languages", [])
+            
+            if task_type == "video+subtitle":
+                type_text = "Video+Subtitle"
+            elif task_type == "video":
+                type_text = "Video"
+            else:
+                type_text = "Subtitle"
+            
+            lang_text = ", ".join(languages)
+            return f"Type: {type_text}  Translating to: {lang_text}"
+        
+        return ""
 
 class TranslationWorker(QObject):
     finished = Signal(int, str, bool)
@@ -3357,32 +3429,24 @@ class MainWindow(FramelessWidget):
         self.tree_view = QTreeView()
         self.tree_view.setAlternatingRowColors(True)
         self.tree_view.setRootIsDecorated(True)
-        self.tree_view.setUniformRowHeights(True)
+        self.tree_view.setUniformRowHeights(False)
         self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree_view.customContextMenuRequested.connect(self.show_context_menu)
         self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
-        self.model = QStandardItemModel()
-        self.model.setHorizontalHeaderLabels(["File Name", "Output Languages", "Type", "Description", "Status"])
-        self.model.itemChanged.connect(self.on_item_changed)
-        self.tree_view.setModel(self.model)
-        self.tree_view.setColumnWidth(0, 400)
-        self.tree_view.setColumnWidth(1, 120)
-        self.tree_view.setColumnWidth(2, 80)
-        self.tree_view.setColumnWidth(3, 200)
-        self.tree_view.setColumnWidth(4, 150)
-        self.tree_view.setMinimumHeight(250)
         
-        self.icon_delegate = IconTextDelegate()
-        self.icon_delegate.add_icon_config(
-            column=2,  # Type column
-            text_pattern="Video",
-            icon_path=get_resource_path("Files/video-warning.svg"),
-            color="#F5E456",
-            size=12,
-            position="after",
-            spacing=1
-        )
-        self.tree_view.setItemDelegate(self.icon_delegate)
+        self.model = CustomTaskModel(self)
+        self.model.setHorizontalHeaderLabels(["Files", "Movie", "Description", "Status"])
+        self.model.itemChanged.connect(self.on_item_changed)
+        
+        self.custom_delegate = CustomTaskDelegate()
+        self.tree_view.setItemDelegate(self.custom_delegate)
+        self.tree_view.setModel(self.model)
+        
+        self.tree_view.setColumnWidth(0, 350)
+        self.tree_view.setColumnWidth(1, 150)
+        self.tree_view.setColumnWidth(2, 250)
+        self.tree_view.setColumnWidth(3, 150)
+        self.tree_view.setMinimumHeight(250)
         
         self.tree_view.setSortingEnabled(True)
         self.tree_view.sortByColumn(0, Qt.AscendingOrder)
@@ -3493,7 +3557,6 @@ class MainWindow(FramelessWidget):
     
     def _add_task_to_ui(self, file_path, languages, description, task_type="subtitle"):
         lang_display = self._get_language_display_text(languages)
-        lang_tooltip = self._format_language_tooltip(languages)
         
         if task_type == "video+subtitle":
             if is_video_file(file_path):
@@ -3507,12 +3570,8 @@ class MainWindow(FramelessWidget):
             video_item.setToolTip(os.path.dirname(video_path))
             video_item.setEditable(False)
             
-            lang_item = QStandardItem(lang_display)
-            lang_item.setToolTip(lang_tooltip)
-            lang_item.setEditable(False)
-            
-            type_item = QStandardItem("Video+Sub")
-            type_item.setEditable(False)
+            movie_item = QStandardItem("")
+            movie_item.setEditable(False)
             
             desc_item = QStandardItem(description)
             desc_item.setEditable(True)
@@ -3525,16 +3584,15 @@ class MainWindow(FramelessWidget):
             subtitle_child.setToolTip(f"Subtitle: {subtitle_path}")
             subtitle_child.setEditable(False)
             
-            video_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem(""), QStandardItem("")])
+            video_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
             
-            self.model.appendRow([video_item, lang_item, type_item, desc_item, status_item])
+            self.model.appendRow([video_item, movie_item, desc_item, status_item])
             
             self.tasks.append({
                 "path": subtitle_path,
                 "video_path": video_path,
                 "path_item": video_item, 
-                "lang_item": lang_item,
-                "type_item": type_item,
+                "movie_item": movie_item,
                 "desc_item": desc_item, 
                 "status_item": status_item, 
                 "description": description,
@@ -3549,18 +3607,8 @@ class MainWindow(FramelessWidget):
             path_item.setToolTip(os.path.dirname(file_path))
             path_item.setEditable(False)
             
-            lang_item = QStandardItem(lang_display)
-            lang_item.setToolTip(lang_tooltip)
-            lang_item.setEditable(False)
-            
-            type_item = QStandardItem()
-            type_item.setEditable(False)
-            
-            if task_type == "subtitle":
-                type_item.setText("Subtitle")
-            elif task_type == "video":
-                type_item.setText("Video")
-                type_item.setToolTip("Will Extract first subtitle track (language unknown), if the format is not SRT, it will fail")
+            movie_item = QStandardItem("")
+            movie_item.setEditable(False)
             
             desc_item = QStandardItem(description)
             desc_item.setEditable(True)
@@ -3569,12 +3617,11 @@ class MainWindow(FramelessWidget):
             status_item = QStandardItem("Queued")
             status_item.setEditable(False)
             
-            self.model.appendRow([path_item, lang_item, type_item, desc_item, status_item])
+            self.model.appendRow([path_item, movie_item, desc_item, status_item])
             self.tasks.append({
                 "path": file_path, 
                 "path_item": path_item, 
-                "lang_item": lang_item,
-                "type_item": type_item,
+                "movie_item": movie_item,
                 "desc_item": desc_item, 
                 "status_item": status_item, 
                 "description": description,
@@ -4998,6 +5045,11 @@ class MainWindow(FramelessWidget):
                     task["desc_item"].setText(description)
                     task["desc_item"].setToolTip(description)
                     
+                    movie_name = self._extract_movie_name_from_description(description)
+                    if movie_name:
+                        task["movie_item"].setText(movie_name)
+                        task["movie_item"].setToolTip(movie_name)
+                    
                     if file_path in self.queue_manager.state["queue_state"]:
                         self.queue_manager.state["queue_state"][file_path]["description"] = description
                         self.queue_manager.state["queue_state"][file_path]["tmdb_info"] = description
@@ -5027,6 +5079,20 @@ class MainWindow(FramelessWidget):
             self.last_validated_tmdb_key = api_key
         
         return is_valid
+        
+    def _extract_movie_name_from_description(self, description):
+        if not description:
+            return ""
+        
+        lines = description.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('Movie: '):
+                return line[7:].strip()
+            elif line.startswith('Show: '):
+                return line[6:].strip()
+        
+        return ""
 
 if __name__ == "__main__":
     if "--run-gst-subprocess" in sys.argv:
