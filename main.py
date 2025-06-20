@@ -3505,7 +3505,7 @@ class MainWindow(FramelessWidget):
         self.tree_view.setSelectionMode(QTreeView.ExtendedSelection)
         
         self.model = CustomTaskModel(self)
-        self.model.setHorizontalHeaderLabels(["Files", "Movie", "Description", "Status"])
+        self.model.setHorizontalHeaderLabels(["Files", "Title", "Description", "Status"])
         self.model.itemChanged.connect(self.on_item_changed)
         
         self.custom_delegate = CustomTaskDelegate()
