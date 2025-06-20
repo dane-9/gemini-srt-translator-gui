@@ -2195,23 +2195,60 @@ class CustomTaskDelegate(QStyledItemDelegate):
         secondary_font = QFont(option.font)
         secondary_font.setPointSize(max(6, int(option.font.pointSize() * 0.8)))
         
-        primary_text = str(index.data()) if index.data() else ""
+        indicator_font = QFont(option.font)
+        indicator_font.setPointSize(max(6, int(option.font.pointSize() * 0.7)))
         
-        secondary_text = ""
-        if hasattr(index.model(), 'get_secondary_info'):
-            secondary_text = index.model().get_secondary_info(index)
+        if index.column() == 2:
+            primary_text = str(index.data()) if index.data() else ""
+            
+            indicator_text = ""
+            if hasattr(index.model(), 'get_description_source'):
+                indicator_text = index.model().get_description_source(index)
+            
+            indicator_width = 0
+            if indicator_text:
+                painter.setFont(indicator_font)
+                indicator_metrics = painter.fontMetrics()
+                indicator_width = indicator_metrics.horizontalAdvance(indicator_text) + 8
+            
+            primary_rect = QRect(option.rect.left() + 4, option.rect.top() + 2, 
+                               option.rect.width() - 8 - indicator_width, option.rect.height() // 2)
+            
+            painter.setFont(primary_font)
+            painter.drawText(primary_rect, Qt.AlignLeft | Qt.AlignVCenter, primary_text)
+            
+            if indicator_text:
+                indicator_rect = QRect(option.rect.right() - indicator_width, option.rect.top() + 2,
+                                     indicator_width - 4, option.rect.height() // 2)
+                painter.setFont(indicator_font)
+                painter.drawText(indicator_rect, Qt.AlignRight | Qt.AlignVCenter, indicator_text)
         
-        primary_rect = QRect(option.rect.left() + 4, option.rect.top() + 2, 
-                           option.rect.width() - 8, option.rect.height() // 2)
-        secondary_rect = QRect(option.rect.left() + 4, option.rect.top() + option.rect.height() // 2, 
-                             option.rect.width() - 8, option.rect.height() // 2)
+        elif index.column() == 0:
+            primary_text = str(index.data()) if index.data() else ""
+            
+            secondary_text = ""
+            if hasattr(index.model(), 'get_secondary_info'):
+                secondary_text = index.model().get_secondary_info(index)
+            
+            primary_rect = QRect(option.rect.left() + 4, option.rect.top() + 2, 
+                               option.rect.width() - 8, option.rect.height() // 2)
+            secondary_rect = QRect(option.rect.left() + 4, option.rect.top() + option.rect.height() // 2, 
+                                 option.rect.width() - 8, option.rect.height() // 2)
+            
+            painter.setFont(primary_font)
+            painter.drawText(primary_rect, Qt.AlignLeft | Qt.AlignVCenter, primary_text)
+            
+            if secondary_text:
+                painter.setFont(secondary_font)
+                painter.drawText(secondary_rect, Qt.AlignLeft | Qt.AlignVCenter, secondary_text)
         
-        painter.setFont(primary_font)
-        painter.drawText(primary_rect, Qt.AlignLeft | Qt.AlignVCenter, primary_text)
-        
-        if secondary_text:
-            painter.setFont(secondary_font)
-            painter.drawText(secondary_rect, Qt.AlignLeft | Qt.AlignVCenter, secondary_text)
+        else:
+            primary_text = str(index.data()) if index.data() else ""
+            primary_rect = QRect(option.rect.left() + 4, option.rect.top() + 2, 
+                               option.rect.width() - 8, option.rect.height())
+            
+            painter.setFont(primary_font)
+            painter.drawText(primary_rect, Qt.AlignLeft | Qt.AlignVCenter, primary_text)
         
         painter.restore()
 
@@ -2241,6 +2278,17 @@ class CustomTaskModel(QStandardItemModel):
             return f"Type: {type_text}  Translating to: {lang_text}"
         
         return ""
+    
+    def get_description_source(self, index):
+        if index.column() != 2:
+            return ""
+        
+        row = index.row()
+        if row < len(self.main_window.tasks):
+            task = self.main_window.tasks[row]
+            return task.get("description_source", "Manual")
+        
+        return "Manual"
 
 class TranslationWorker(QObject):
     finished = Signal(int, str, bool)
@@ -3596,6 +3644,7 @@ class MainWindow(FramelessWidget):
                 "desc_item": desc_item, 
                 "status_item": status_item, 
                 "description": description,
+                "description_source": "Manual",
                 "languages": languages.copy(),
                 "task_type": task_type,
                 "worker": None, 
@@ -3625,6 +3674,7 @@ class MainWindow(FramelessWidget):
                 "desc_item": desc_item, 
                 "status_item": status_item, 
                 "description": description,
+                "description_source": "Manual",
                 "languages": languages.copy(),
                 "task_type": task_type,
                 "worker": None, 
@@ -3670,10 +3720,11 @@ class MainWindow(FramelessWidget):
             self.active_worker.force_cancel()
 
     def on_item_changed(self, item):
-        if item.column() == 3:
+        if item.column() == 2:
             row = item.row()
             if 0 <= row < len(self.tasks):
                 self.tasks[row]["description"] = item.text()
+                self.tasks[row]["description_source"] = "Manual"
                 item.setToolTip(item.text())
 
     def keyPressEvent(self, event):
@@ -3918,6 +3969,7 @@ class MainWindow(FramelessWidget):
                 self.tasks[row]["desc_item"].setText(self.clipboard_description)
                 self.tasks[row]["desc_item"].setToolTip(self.clipboard_description)
                 self.tasks[row]["description"] = self.clipboard_description
+                self.tasks[row]["description_source"] = "Manual"
     
     def edit_single_description(self):
         selected_rows = self._get_selected_task_rows()
@@ -3934,6 +3986,7 @@ class MainWindow(FramelessWidget):
                 self.tasks[row]["desc_item"].setText(new_description)
                 self.tasks[row]["desc_item"].setToolTip(new_description)
                 self.tasks[row]["description"] = new_description
+                self.tasks[row]["description_source"] = "Manual"
     
     def bulk_edit_description(self):
         selected_rows = self._get_selected_task_rows()
@@ -3964,6 +4017,7 @@ class MainWindow(FramelessWidget):
                     self.tasks[row]["desc_item"].setText(new_description)
                     self.tasks[row]["desc_item"].setToolTip(new_description)
                     self.tasks[row]["description"] = new_description
+                    self.tasks[row]["description_source"] = "Manual"
 
     def move_selected_to_top(self):
         if self.active_thread and self.active_thread.isRunning():
@@ -5044,6 +5098,7 @@ class MainWindow(FramelessWidget):
                     task["description"] = description
                     task["desc_item"].setText(description)
                     task["desc_item"].setToolTip(description)
+                    task["description_source"] = "Auto"
                     
                     movie_name = self._extract_movie_name_from_description(description)
                     if movie_name:
