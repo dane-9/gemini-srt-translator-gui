@@ -4114,7 +4114,7 @@ class MainWindow(FramelessWidget):
             self.model.appendRow(model_row)
         
     def _get_language_display_text(self, lang_codes):
-        if len(lang_codes) <= 2:
+        if len(lang_codes) <= 3:
             language_names = self._get_language_names_from_codes(lang_codes)
             return ", ".join(language_names)
         else:
@@ -4171,15 +4171,6 @@ class MainWindow(FramelessWidget):
                 self.model.setData(current_index.siblingAtColumn(0), self.clipboard_description, DescriptionRole)
         else:
             super().keyPressEvent(event)
-    
-    def _format_language_tooltip(self, lang_codes, max_display=5):
-        language_names = self._get_language_names_from_codes(lang_codes)
-        if len(language_names) <= max_display:
-            return ", ".join(language_names)
-        else:
-            displayed = ", ".join(language_names[:max_display])
-            remaining = len(language_names) - max_display
-            return f"{displayed} and {remaining} more..."
                 
     def open_language_selection(self):
         dialog = LanguageSelectionDialog(self.selected_languages, self)
