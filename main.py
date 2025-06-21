@@ -4669,19 +4669,31 @@ class MainWindow(FramelessWidget):
             
     def _get_subtitle_score(self, subtitle_path):
         score = 0
-        parsed = _parse_subtitle_filename(os.path.basename(subtitle_path))
+        basename = os.path.basename(subtitle_path)
+        basename_lower = basename.lower()
+        parsed = _parse_subtitle_filename(basename)
 
-        if parsed:
-            lang_code = parsed.get('lang_code')
-            if lang_code:
-                score += 4
-                if lang_code == 'en':
-                    score += 2
-            if not parsed.get('sdh'):
+        if not parsed:
+            return 0
+
+        lang_code = parsed.get('lang_code')
+        if lang_code:
+            score += 10
+            if lang_code == 'en' or 'eng':
+                score += 5
+            elif lang_code in {'es', 'spa', 'fr', 'fra',  'de', 'deu'}:
                 score += 2
-            if not parsed.get('forced'):
-                score += 1
+
+        if parsed.get('forced'):
+            score -= 50
+
+        is_sdh = False
+        if parsed.get('sdh'):
+            is_sdh = True
         
+        if is_sdh:
+            score -= 20
+
         return score
 
     def _on_files_processed(self, prepared_tasks):
