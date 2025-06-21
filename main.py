@@ -619,7 +619,7 @@ class IconTextDelegate(QStyledItemDelegate):
 class TMDBLookupWorker(QObject):
     finished = Signal(str, str, bool)
     status_update = Signal(str, str)
-    
+
     def __init__(self, file_path, api_key, movie_template, episode_template, semaphore):
         super().__init__()
         self.file_path = file_path
@@ -628,7 +628,26 @@ class TMDBLookupWorker(QObject):
         self.episode_template = episode_template
         self.base_url = "https://api.themoviedb.org/3"
         self.semaphore = semaphore
-        
+
+    def _trim_show_data(self, full_show_data):
+        if not full_show_data:
+            return {}
+        return {
+            'id': full_show_data.get('id'),
+            'name': full_show_data.get('name'),
+            'overview': full_show_data.get('overview'),
+            'genres': full_show_data.get('genres', [])
+        }
+
+    def _trim_episode_data(self, full_episode_data):
+        if not full_episode_data:
+            return {}
+        return {
+            'name': full_episode_data.get('name'),
+            'overview': full_episode_data.get('overview'),
+            'episode_number': full_episode_data.get('episode_number')
+        }
+
     def run(self):
         acquired = False
         try:
@@ -759,7 +778,6 @@ class TMDBLookupWorker(QObject):
         
         if cached_episode:
             episode_details = cached_episode["data"]
-            
             cached_show = self.tmdb_cache.get_cached_show(show_title)
             tv_details = cached_show["data"] if cached_show else {}
         else:
@@ -774,18 +792,32 @@ class TMDBLookupWorker(QObject):
                     return ""
                 
                 tv_id = search_result['results'][0]['id']
-                tv_details = self._make_request(f'tv/{tv_id}')
+                full_tv_details = self._make_request(f'tv/{tv_id}')
                 
-                if not tv_details:
+                if not full_tv_details:
                     return ""
+                
+                tv_details = self._trim_show_data(full_tv_details)
                 
                 if hasattr(self, 'tmdb_cache'):
                     self.tmdb_cache.cache_show(show_title, tv_id, tv_details.get('name', ''), tv_details)
-            
-            episode_details = self._make_request(f'tv/{tv_id}/season/{season}/episode/{episode}')
-            
-            if not episode_details:
+
+            tv_id_for_episode_lookup = tv_details.get('id')
+            if not tv_id_for_episode_lookup:
+                if cached_show:
+                    tv_id_for_episode_lookup = cached_show.get('tmdb_id')
+                elif 'tv_id' in locals():
+                    tv_id_for_episode_lookup = tv_id
+
+            if not tv_id_for_episode_lookup:
                 return ""
+
+            full_episode_details = self._make_request(f'tv/{tv_id_for_episode_lookup}/season/{season}/episode/{episode}')
+            
+            if not full_episode_details:
+                return ""
+
+            episode_details = self._trim_episode_data(full_episode_details)
             
             if hasattr(self, 'tmdb_cache'):
                 self.tmdb_cache.cache_episode(show_title, season, episode, episode_details)
