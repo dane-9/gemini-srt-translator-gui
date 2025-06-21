@@ -673,61 +673,83 @@ class FileAdditionWorker(QObject):
         super().__init__()
         self.file_paths = file_paths
 
+    def _select_best_subtitle(self, subtitle_paths):
+        best_subtitle = None
+        highest_score = -1
+
+        for path in subtitle_paths:
+            score = 0
+            parsed = _parse_subtitle_filename(os.path.basename(path))
+
+            if parsed:
+                if parsed.get('lang_code'):
+                    score += 4
+                if not parsed.get('sdh'):
+                    score += 2
+                if not parsed.get('forced'):
+                    score += 1
+
+            if score > highest_score:
+                highest_score = score
+                best_subtitle = path
+        
+        return best_subtitle or (subtitle_paths[0] if subtitle_paths else None)
+
     def run(self):
         self.status_update.emit("Discovering Files...")
         
-        video_files = [f for f in self.file_paths if is_video_file(f)]
-        subtitle_files = [f for f in self.file_paths if is_subtitle_file(f)]
-        
-        processed_files = set()
+        groups = {}
+
+        for path in self.file_paths:
+            if is_video_file(path):
+                base_name = os.path.splitext(os.path.basename(path))[0]
+                if base_name not in groups:
+                    groups[base_name] = {'videos': [], 'subtitles': []}
+                groups[base_name]['videos'].append(path)
+            elif is_subtitle_file(path):
+                parsed = _parse_subtitle_filename(os.path.basename(path))
+                base_name = parsed['base_name'] if parsed and parsed['base_name'] else _strip_language_codes_from_name(os.path.splitext(os.path.basename(path))[0])
+                if base_name not in groups:
+                    groups[base_name] = {'videos': [], 'subtitles': []}
+                groups[base_name]['subtitles'].append(path)
+
         tasks_to_add = []
-        
-        for subtitle_path in subtitle_files:
-            if subtitle_path in processed_files:
-                continue
-                
-            video_pair = None
-            subtitle_base = os.path.splitext(os.path.basename(subtitle_path))[0]
-            subtitle_info = _parse_subtitle_filename(os.path.basename(subtitle_path))
-            
-            for video_path in video_files:
-                if video_path in processed_files:
-                    continue
-                    
-                if _files_are_pair(subtitle_path, video_path):
-                    video_pair = video_path
-                    break
-            
-            if video_pair:
-                task_type = "video+subtitle"
-                primary_file = subtitle_path
-                
-                processed_files.add(subtitle_path)
-                processed_files.add(video_pair)
+        processed_videos = set()
+
+        for base_name, files in groups.items():
+            videos = files['videos']
+            subtitles = files['subtitles']
+
+            if videos and subtitles:
+                video_path = videos[0]
+                best_subtitle = self._select_best_subtitle(subtitles)
                 
                 tasks_to_add.append({
-                    'primary_file': primary_file,
-                    'video_file': video_pair,
-                    'task_type': task_type,
+                    'primary_file': best_subtitle,
+                    'video_file': video_path,
+                    'task_type': 'video+subtitle',
                     'requires_extraction': True
                 })
-            else:
-                processed_files.add(subtitle_path)
-                tasks_to_add.append({
-                    'primary_file': subtitle_path,
-                    'video_file': None,
-                    'task_type': 'subtitle',
-                    'requires_extraction': False
-                })
-        
-        for video_path in video_files:
-            if video_path not in processed_files:
-                tasks_to_add.append({
-                    'primary_file': video_path,
-                    'video_file': video_path,
-                    'task_type': 'video',
-                    'requires_extraction': False
-                })
+                processed_videos.add(video_path)
+            
+            elif videos:
+                for video_path in videos:
+                    if video_path not in processed_videos:
+                        tasks_to_add.append({
+                            'primary_file': video_path,
+                            'video_file': video_path,
+                            'task_type': 'video',
+                            'requires_extraction': False
+                        })
+            
+            elif subtitles:
+                 for sub_path in subtitles:
+                    tasks_to_add.append({
+                        'primary_file': sub_path,
+                        'video_file': None,
+                        'task_type': 'subtitle',
+                        'requires_extraction': False
+                    })
         
         self.finished.emit(tasks_to_add)
         
