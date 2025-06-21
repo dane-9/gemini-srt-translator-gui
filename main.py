@@ -1887,39 +1887,46 @@ class TranslationWorker(QObject):
                 cmd = [sys.executable, executable_path, "--run-audio-extraction"]
             
             cmd.extend(["--gemini_api_key", "DUMMY_KEY_FOR_AUDIO_EXTRACTION_ONLY"])
-
             cmd.extend(["--video_file", video_file])
             cmd.extend(["--model_name", self.model_name])
             
+            extracted_srt_to_delete = None
+            
             def audio_line_callback(line):
+                nonlocal extracted_srt_to_delete
                 if not line: return
                 clean_line = line.strip()
                 if "Starting audio extraction" in clean_line:
                     self.progress_update.emit(self.task_index, 30, "Starting audio extraction...")
                 elif "Success! Audio saved as:" in clean_line:
                     self.progress_update.emit(self.task_index, 90, "Audio extraction completed")
-                
+                elif "Please provide a target language" in clean_line:
+                    video_dir = os.path.dirname(video_file)
+                    video_name = os.path.splitext(os.path.basename(video_file))[0]
+                    extracted_srt_to_delete = os.path.join(video_dir, f"{video_name}_extracted.srt")
+            
             process_cwd = get_app_directory()
             self._run_and_monitor_subprocess(cmd, audio_line_callback, process_cwd)
             
             if self._should_force_cancel():
                 self._cleanup_current_language_only()
                 return False
-
+    
+            if extracted_srt_to_delete and os.path.exists(extracted_srt_to_delete):
+                try:
+                    os.remove(extracted_srt_to_delete)
+                except Exception as e:
+                    pass
+    
             video_basename = os.path.basename(video_file)
             video_name = os.path.splitext(video_basename)[0]
             video_dir = os.path.dirname(video_file)
             expected_audio = os.path.join(video_dir, f"{video_name}_extracted.mp3")
-            expected_subtitle = os.path.join(video_dir, f"{video_name}_extracted.srt")
             
             if os.path.exists(expected_audio):
                 self.queue_manager.set_audio_extraction_status(
                     self.input_file_path, "completed", expected_audio
                 )
-                if os.path.exists(expected_subtitle):
-                    if self.input_file_path in self.queue_manager.state["queue_state"]:
-                        self.queue_manager.state["queue_state"][self.input_file_path]["extracted_subtitle_file"] = expected_subtitle
-                        self.queue_manager._save_queue_state()
                 self.status_message.emit(self.task_index, "Audio extraction successful")
                 return True
             else:
