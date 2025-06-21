@@ -620,16 +620,21 @@ class TMDBLookupWorker(QObject):
     finished = Signal(str, str, bool)
     status_update = Signal(str, str)
     
-    def __init__(self, file_path, api_key, movie_template, episode_template):
+    def __init__(self, file_path, api_key, movie_template, episode_template, semaphore):
         super().__init__()
         self.file_path = file_path
         self.api_key = api_key
         self.movie_template = movie_template
         self.episode_template = episode_template
         self.base_url = "https://api.themoviedb.org/3"
+        self.semaphore = semaphore
         
     def run(self):
+        acquired = False
         try:
+            self.semaphore.acquire()
+            acquired = True
+            
             self.status_update.emit(self.file_path, "Fetching TMDB info...")
             
             parsed_info = self._parse_filename(self.file_path)
@@ -647,6 +652,9 @@ class TMDBLookupWorker(QObject):
             
         except Exception as e:
             self.finished.emit(self.file_path, "", False)
+        finally:
+            if acquired:
+                self.semaphore.release()
     
     def _parse_filename(self, file_path):
         basename = os.path.basename(file_path)
@@ -3570,6 +3578,9 @@ class MainWindow(FramelessWidget):
         
         self.move(x, y)
         
+        self.tmdb_semaphore = threading.Semaphore(3)
+        self.tmdb_queue = []
+        
         icon_path = get_resource_path("Files/icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
@@ -4565,6 +4576,8 @@ class MainWindow(FramelessWidget):
         
         for file_path in files_for_tmdb:
             self._start_tmdb_lookup(file_path)
+        
+        self._process_tmdb_queue()
     
     def _prepare_task_data(self, file_path, languages, description, task_type="subtitle"):
         if task_type == "video+subtitle":
@@ -4863,7 +4876,7 @@ class MainWindow(FramelessWidget):
         has_work_remaining = self.queue_manager.has_any_work_remaining()
         is_processing = self.active_thread is not None and self.active_thread.isRunning()
         has_any_tasks = len(self.tasks) > 0
-        has_tmdb_operations = bool(self.tmdb_lookup_workers)
+        has_tmdb_operations = bool(self.tmdb_lookup_workers) or bool(self.tmdb_queue)
         
         key_status = self.validate_both_api_keys()
         
@@ -4874,7 +4887,15 @@ class MainWindow(FramelessWidget):
             self.start_stop_btn.setText("Stop After Current Language")  
             self.start_stop_btn.setEnabled(True)
         elif has_tmdb_operations:
-            self.start_stop_btn.setText("Fetching TMDB Info...")
+            total_count = len(self.tmdb_lookup_workers)
+            queued_count = len(self.tmdb_queue)
+            
+            if total_count > 0 and queued_count > 0:
+                self.start_stop_btn.setText(f"Fetching TMDB Info... ({total_count} active, {queued_count} queued)")
+            elif total_count > 1:
+                self.start_stop_btn.setText(f"Fetching TMDB Info... ({total_count} active)")
+            else:
+                self.start_stop_btn.setText("Fetching TMDB Info...")
             self.start_stop_btn.setEnabled(False)
         else:
             if not key_status['key1_provided']:
@@ -5265,7 +5286,14 @@ class MainWindow(FramelessWidget):
         for row in selected_rows:
             if 0 <= row < len(self.tasks):
                 task_path = self.tasks[row]["path"]
-                self._start_tmdb_lookup(task_path, force=True)
+                
+                if task_path in self.tmdb_lookup_workers:
+                    continue
+                    
+                if task_path not in self.tmdb_queue:
+                    self.tmdb_queue.append(task_path)
+        
+        self._process_tmdb_queue()
     
     def _start_tmdb_lookup(self, file_path, force=False):
         api_key = self.tmdb_api_key_edit.text().strip()
@@ -5288,25 +5316,78 @@ class MainWindow(FramelessWidget):
         if file_path in self.tmdb_lookup_workers:
             return
         
-        movie_template = self.settings.get("tmdb_movie_template", "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}")
-        episode_template = self.settings.get("tmdb_episode_template", "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}")
+        if file_path not in self.tmdb_queue:
+            self.tmdb_queue.append(file_path)
         
-        worker = TMDBLookupWorker(file_path, api_key, movie_template, episode_template)
-        worker.tmdb_cache = self.tmdb_cache
-        thread = QThread(self)
+        self._process_tmdb_queue()
         
-        worker.moveToThread(thread)
-        worker.status_update.connect(self._on_tmdb_status_update)
-        worker.finished.connect(self._on_tmdb_finished)
-        thread.started.connect(worker.run)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
+    def _process_tmdb_queue(self):
+        while len(self.tmdb_lookup_workers) < 3 and self.tmdb_queue:
+            file_path = self.tmdb_queue.pop(0)
+            
+            if file_path in self.tmdb_lookup_workers:
+                continue
+            
+            api_key = self.tmdb_api_key_edit.text().strip()
+            if not api_key:
+                continue
+                
+            movie_template = self.settings.get("tmdb_movie_template", "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}")
+            episode_template = self.settings.get("tmdb_episode_template", "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}")
+            
+            worker = TMDBLookupWorker(file_path, api_key, movie_template, episode_template, self.tmdb_semaphore)
+            worker.tmdb_cache = self.tmdb_cache
+            thread = QThread(self)
+            
+            worker.moveToThread(thread)
+            worker.status_update.connect(self._on_tmdb_status_update)
+            worker.finished.connect(self._on_tmdb_finished_ordered)
+            thread.started.connect(worker.run)
+            thread.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            
+            self.tmdb_lookup_workers[file_path] = worker
+            self.tmdb_threads[file_path] = thread
+            
+            thread.start()
         
-        self.tmdb_lookup_workers[file_path] = worker
-        self.tmdb_threads[file_path] = thread
-        
-        thread.start()
         self.update_button_states()
+    
+    def _on_tmdb_finished_ordered(self, file_path, description, success):
+        if file_path in self.tmdb_lookup_workers:
+            del self.tmdb_lookup_workers[file_path]
+        
+        if file_path in self.tmdb_threads:
+            thread = self.tmdb_threads[file_path]
+            if thread.isRunning():
+                thread.quit()
+                thread.wait()
+            del self.tmdb_threads[file_path]
+        
+        for task in self.tasks:
+            if task["path"] == file_path:
+                if success and description:
+                    task["description"] = description
+                    task["desc_item"].setText(description)
+                    task["desc_item"].setToolTip(description)
+                    task["description_source"] = "Auto"
+                    
+                    movie_name = self._extract_movie_name_from_description(description)
+                    if movie_name:
+                        task["movie_item"].setText(movie_name)
+                        task["movie_item"].setToolTip(movie_name)
+                        task["tmdb_title"] = movie_name
+                    
+                    if file_path in self.queue_manager.state["queue_state"]:
+                        self.queue_manager.state["queue_state"][file_path]["description"] = description
+                        self.queue_manager.state["queue_state"][file_path]["tmdb_info"] = description
+                        self.queue_manager.state["queue_state"][file_path]["tmdb_title"] = movie_name
+                        self.queue_manager._save_queue_state()
+                
+                task["status_item"].setText("Queued")
+                break
+        
+        self._process_tmdb_queue()
     
     def _on_tmdb_status_update(self, file_path, status):
         for task in self.tasks:
