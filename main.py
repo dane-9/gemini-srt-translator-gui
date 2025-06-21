@@ -1716,7 +1716,8 @@ class CustomFramelessDialog(FramelessWidget):
 class CustomMessageBox(CustomFramelessDialog):
     def __init__(self, icon_type, title, text, buttons=QMessageBox.Ok, parent=None, secondary_text=None):
         super().__init__(title, parent)
-        self.setMinimumSize(300, 150)
+        self.setFixedWidth(400)
+        self.setMinimumHeight(175)
         self.result_value = QMessageBox.Cancel
         
         layout = self.get_content_layout()
@@ -1816,7 +1817,7 @@ class CustomMessageBox(CustomFramelessDialog):
 class BulkDescriptionDialog(CustomFramelessDialog):
     def __init__(self, current_text="", parent=None):
         super().__init__("Edit Description", parent)
-        self.setMinimumSize(400, 200)
+        self.setFixedSize(500, 350)
         
         layout = self.get_content_layout()
         self.text_edit = QTextEdit()
@@ -1834,7 +1835,7 @@ class BulkDescriptionDialog(CustomFramelessDialog):
 class SettingsDialog(CustomFramelessDialog):
     def __init__(self, current_settings, parent=None):
         super().__init__("Advanced Settings", parent)
-        self.setMinimumSize(600, 500)
+        self.setFixedSize(650, 600)
         self.settings = current_settings.copy()
         
         layout = self.get_content_layout()
@@ -2423,7 +2424,7 @@ class TemplateEditorDialog(CustomFramelessDialog):
 class LanguageSelectionDialog(CustomFramelessDialog):
     def __init__(self, selected_languages=None, parent=None):
         super().__init__("Select Output Languages", parent)
-        self.setMinimumSize(400, 500)
+        self.setFixedSize(400, 500)
         self.selected_languages = selected_languages or ["sv"]
         self.setup_ui()
         
