@@ -2608,22 +2608,23 @@ class CustomTaskModel(QStandardItemModel):
         super().__init__()
         self.main_window = main_window
     
+          
     def get_secondary_info(self, index):
-            if index.column() != 0:
-                return ""
-            
-            task_type = index.data(TaskTypeRole) or "subtitle"
-            languages = index.data(LanguagesRole) or []
-    
-            if task_type == "video+subtitle":
-                type_text = "Video+Subtitle"
-            elif task_type == "video":
-                type_text = "Video"
-            else:
-                type_text = "Subtitle"
-            
-            lang_text = ", ".join(languages)
-            return f"Type: {type_text}  Translating to: {lang_text}"
+        if index.column() != 0:
+            return ""
+        
+        task_type = index.data(TaskTypeRole) or "subtitle"
+        languages = index.data(LanguagesRole) or []
+
+        if task_type == "video+subtitle":
+            type_text = "Video+Subtitle"
+        elif task_type == "video":
+            type_text = "Video"
+        else:
+            type_text = "Subtitle"
+        
+        lang_text = self.main_window._get_language_display_text(languages)
+        return f"Type: {type_text}  Translating to: {lang_text}"
     
     def get_description_source(self, index):
         if index.column() != 2:
