@@ -3737,6 +3737,8 @@ class MainWindow(FramelessWidget):
         
         self.move(x, y)
         
+        self.setAcceptDrops(True)
+        
         self.tmdb_semaphore = threading.Semaphore(3)
         self.tmdb_queue = []
         
@@ -4646,22 +4648,7 @@ class MainWindow(FramelessWidget):
             "Media Files (*.srt *.mp4 *.mkv *.avi *.mov);;SRT Files (*.srt);;Video Files (*.mp4 *.mkv *.avi *.mov);;All Files (*)"
         )
         if files:
-            worker = FileAdditionWorker(files)
-            thread = QThread()
-            
-            self.file_adder_thread = (thread, worker) 
-            
-            worker.moveToThread(thread)
-            
-            worker.status_update.connect(self.start_stop_btn.setText)
-            worker.finished.connect(self._on_files_processed)
-            thread.started.connect(worker.run)
-            worker.finished.connect(thread.quit)
-            thread.finished.connect(worker.deleteLater)
-            thread.finished.connect(self._on_file_adder_finished)
-            
-            thread.start()
-            self.update_button_states()
+            self._initiate_file_addition(files)
 
     def _on_files_processed(self, prepared_tasks):
         newly_added_tasks = []
@@ -5576,6 +5563,44 @@ class MainWindow(FramelessWidget):
         path_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
 
         self.tree_view.viewport().update()
+        
+    def _initiate_file_addition(self, files):
+        if self.file_adder_thread:
+            return
+
+        valid_files = [f for f in files if is_video_file(f) or is_subtitle_file(f)]
+        if not valid_files:
+            return
+
+        worker = FileAdditionWorker(valid_files)
+        thread = QThread()
+        
+        self.file_adder_thread = (thread, worker) 
+        
+        worker.moveToThread(thread)
+        
+        worker.status_update.connect(self.start_stop_btn.setText)
+        worker.finished.connect(self._on_files_processed)
+        thread.started.connect(worker.run)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._on_file_adder_finished)
+        
+        thread.start()
+        self.update_button_states()
+        
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            files = [url.toLocalFile() for url in event.mimeData().urls()]
+            if files:
+                self._initiate_file_addition(files)
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
 
 if __name__ == "__main__":
     if "--run-gst-subprocess" in sys.argv:
