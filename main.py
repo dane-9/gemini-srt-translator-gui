@@ -2343,41 +2343,42 @@ class TemplateEditorDialog(CustomFramelessDialog):
     def __init__(self, template_type, current_template="", parent=None):
         title = f"Edit {template_type.title()} Template"
         super().__init__(title, parent)
-        self.setMinimumSize(600, 500)
+        self.setFixedSize(700, 450)
         self.template_type = template_type
         
         layout = self.get_content_layout()
-        
+
         main_layout = QHBoxLayout()
+
+        left_column_layout = QVBoxLayout()
         
-        left_layout = QVBoxLayout()
-        
-        template_label = QLabel("Template:")
+        template_label = QLabel("Template")
         template_label.setStyleSheet("font-weight: bold;")
-        left_layout.addWidget(template_label)
+        template_label.setAlignment(Qt.AlignCenter)
+        left_column_layout.addWidget(template_label, 0)
         
         self.text_edit = QTextEdit()
         self.text_edit.setPlainText(current_template)
         self.text_edit.textChanged.connect(self.update_preview)
-        left_layout.addWidget(self.text_edit)
+        left_column_layout.addWidget(self.text_edit, 1)
         
-        main_layout.addLayout(left_layout)
-        
-        right_layout = QVBoxLayout()
-        
-        preview_label = QLabel("Preview:")
+        main_layout.addLayout(left_column_layout)
+
+        right_column_layout = QVBoxLayout()
+
+        preview_label = QLabel("Preview")
         preview_label.setStyleSheet("font-weight: bold;")
-        right_layout.addWidget(preview_label)
+        preview_label.setAlignment(Qt.AlignCenter)
+        right_column_layout.addWidget(preview_label, 0)
         
         self.preview_area = QLabel()
         self.preview_area.setWordWrap(True)
         self.preview_area.setStyleSheet("background-color: #2a2a2a; padding: 15px; border-radius: 4px; font-family: Arial;")
         self.preview_area.setAlignment(Qt.AlignTop)
-        self.preview_area.setMinimumWidth(250)
-        right_layout.addWidget(self.preview_area)
+        right_column_layout.addWidget(self.preview_area, 1)
         
-        main_layout.addLayout(right_layout)
-        
+        main_layout.addLayout(right_column_layout)
+
         layout.addLayout(main_layout)
         
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
