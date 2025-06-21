@@ -616,6 +616,31 @@ class IconTextDelegate(QStyledItemDelegate):
         icon_rect = QRect(icon_x, icon_y, icon_size, icon_size)
         config['icon'].paint(painter, icon_rect)
         
+class APIKeyValidator(QObject):
+    validation_finished = Signal(str, bool)
+
+    def __init__(self, key_id, api_key):
+        super().__init__()
+        self.key_id = key_id
+        self.api_key = api_key.strip()
+
+    def run(self):
+        is_valid = False
+        try:
+            if not self.api_key:
+                is_valid = self.key_id != 'gemini1'
+            elif self.key_id.startswith('gemini'):
+                from google import genai
+                client = genai.Client(api_key=self.api_key)
+                client.models.count_tokens(model="gemini-2.5-flash-lite-preview-06-17", contents="test")
+                is_valid = True
+            elif self.key_id == 'tmdb':
+                is_valid = _validate_tmdb_api_key(self.api_key)
+        except Exception:
+            is_valid = False
+        finally:
+            self.validation_finished.emit(self.key_id, is_valid)
+        
 class TMDBLookupWorker(QObject):
     finished = Signal(str, str, bool)
     status_update = Signal(str, str)
@@ -3629,15 +3654,8 @@ class MainWindow(FramelessWidget):
         self.stop_after_current_task = False
         self._exit_timer = None
         
-        self.api_key1_validated = False
-        self.api_key2_validated = False
-        self.last_validated_key1 = ""
-        self.last_validated_key2 = ""
-        
         self.tmdb_lookup_workers = {}
         self.tmdb_threads = {}
-        self.tmdb_api_key_validated = False
-        self.last_validated_tmdb_key = ""
         
         title_bar = self.getTitleBar()
         title_bar.setTitleBarFont(QFont('Arial', 12))
@@ -3671,7 +3689,7 @@ class MainWindow(FramelessWidget):
         self.api_key_edit.set_right_text("API Key 1", font_size=9, italic=False, color="#555555")
         self.api_key_edit.setEchoMode(QLineEdit.Password)
         self.api_key_edit.setText(self.settings.get("gemini_api_key", ""))
-        self.api_key_edit.textChanged.connect(self.on_api_key1_changed)
+        self.api_key_edit.textChanged.connect(lambda: self._on_key_text_changed('gemini1'))
         api_keys_model_layout.addWidget(self.api_key_edit)
         
         self.api_key2_edit = CustomLineEdit()
@@ -3679,7 +3697,7 @@ class MainWindow(FramelessWidget):
         self.api_key2_edit.set_right_text("API Key 2", font_size=9, italic=False, color="#555555")
         self.api_key2_edit.setEchoMode(QLineEdit.Password)
         self.api_key2_edit.setText(self.settings.get("gemini_api_key2", ""))
-        self.api_key2_edit.textChanged.connect(self.on_api_key2_changed)
+        self.api_key2_edit.textChanged.connect(lambda: self._on_key_text_changed('gemini2'))
         api_keys_model_layout.addWidget(self.api_key2_edit)
         
         self.tmdb_api_key_edit = CustomLineEdit()
@@ -3687,7 +3705,7 @@ class MainWindow(FramelessWidget):
         self.tmdb_api_key_edit.set_right_text("TMDB API Key", font_size=9, italic=False, color="#555555")
         self.tmdb_api_key_edit.setEchoMode(QLineEdit.Password)
         self.tmdb_api_key_edit.setText(self.settings.get("tmdb_api_key", ""))
-        self.tmdb_api_key_edit.textChanged.connect(self.on_tmdb_api_key_changed)
+        self.tmdb_api_key_edit.textChanged.connect(lambda: self._on_key_text_changed('tmdb'))
         api_keys_model_layout.addWidget(self.tmdb_api_key_edit)
         
         self.model_name_edit = CustomLineEdit()
@@ -3799,8 +3817,155 @@ class MainWindow(FramelessWidget):
         
         self._sync_ui_with_queue_state()
         
+        self._setup_api_key_validation()
         self.update_button_states()
+
+    def _setup_api_key_validation(self):
+        self.validation_states = {
+            'gemini1': 'unvalidated', 
+            'gemini2': 'unvalidated', 
+            'tmdb': 'unvalidated'
+        }
+        self.validation_timers = {}
+        self.active_validators = {}
+
+        for key_id in ['gemini1', 'gemini2', 'tmdb']:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda k=key_id: self._start_validation(k))
+            self.validation_timers[key_id] = timer
         
+        QTimer.singleShot(100, lambda: self._on_key_text_changed('gemini1'))
+        QTimer.singleShot(100, lambda: self._on_key_text_changed('gemini2'))
+        QTimer.singleShot(100, lambda: self._on_key_text_changed('tmdb'))
+
+    def _on_key_text_changed(self, key_id):
+        line_edit = {
+            'gemini1': self.api_key_edit,
+            'gemini2': self.api_key2_edit,
+            'tmdb': self.tmdb_api_key_edit
+        }.get(key_id)
+
+        if not line_edit:
+            return
+
+        self.settings.update({
+            "gemini_api_key": self.api_key_edit.text(),
+            "gemini_api_key2": self.api_key2_edit.text(),
+            "tmdb_api_key": self.tmdb_api_key_edit.text()
+        })
+        
+        if self.validation_states.get(key_id) != 'unvalidated':
+            self.validation_states[key_id] = 'unvalidated'
+            self.update_button_states()
+
+        self.validation_timers[key_id].start(600)
+
+    def _start_validation(self, key_id):
+        if key_id in self.active_validators:
+            return
+
+        line_edit = {
+            'gemini1': self.api_key_edit,
+            'gemini2': self.api_key2_edit,
+            'tmdb': self.tmdb_api_key_edit
+        }.get(key_id)
+        
+        api_key = line_edit.text()
+
+        if not api_key.strip() and key_id != 'gemini1':
+            self._on_validation_finished(key_id, True)
+            return
+
+        self.validation_states[key_id] = 'validating'
+        line_edit.set_right_text("Validating...", font_size=8, color="#888888")
+        self.update_button_states()
+
+        worker = APIKeyValidator(key_id, api_key)
+        thread = QThread()
+        self.active_validators[key_id] = (thread, worker)
+        worker.moveToThread(thread)
+        
+        worker.validation_finished.connect(self._on_validation_finished)
+        worker.validation_finished.connect(thread.quit)
+        thread.started.connect(worker.run)
+        thread.finished.connect(lambda: self._on_validator_thread_finished(key_id))
+        
+        thread.start()
+
+    def _on_validation_finished(self, key_id, is_valid):
+        line_edit = {
+            'gemini1': self.api_key_edit,
+            'gemini2': self.api_key2_edit,
+            'tmdb': self.tmdb_api_key_edit
+        }.get(key_id)
+
+        if not line_edit: return
+
+        if not line_edit.text().strip() and key_id != 'gemini1':
+            self.validation_states[key_id] = 'valid'
+            if key_id == 'gemini2':
+                line_edit.set_right_text("API Key 2", font_size=9, italic=False, color="#555555")
+            elif key_id == 'tmdb':
+                line_edit.set_right_text("TMDB API Key", font_size=9, italic=False, color="#555555")
+        
+        elif is_valid:
+            self.validation_states[key_id] = 'valid'
+            line_edit.set_right_text("Valid", font_size=8, color="#4CAF50")
+        else:
+            self.validation_states[key_id] = 'invalid'
+            line_edit.set_right_text("Invalid", font_size=8, color="#F44336")
+        
+        self.update_button_states()
+    
+    def _on_validator_thread_finished(self, key_id):
+        if key_id in self.active_validators:
+            thread, worker = self.active_validators[key_id]
+            worker.deleteLater()
+            thread.deleteLater()
+            del self.active_validators[key_id]
+
+    def start_translation_queue(self):
+        if self.validation_states['gemini1'] != 'valid':
+            CustomMessageBox.warning(self, "API Key Missing or Invalid", "Please enter a valid primary Gemini API Key.")
+            self.api_key_edit.setFocus()
+            return
+        
+        if self.api_key2_edit.text().strip() and self.validation_states['gemini2'] != 'valid':
+            CustomMessageBox.warning(self, "Invalid Secondary API Key", 
+                                   "The secondary API key is invalid. Please verify your key or clear the field.")
+            self.api_key2_edit.setFocus()
+            return
+                
+        if self.active_thread and self.active_thread.isRunning():
+            CustomMessageBox.information(self, "In Progress", "A translation is already in progress.")
+            return
+        
+        if not self.queue_manager.has_any_work_remaining():
+            CustomMessageBox.information(self, "Queue Status", "No work remaining in queue.")
+            return
+            
+        self.model.blockSignals(True)
+        for task in self.tasks:
+            if task.get("desc_item"):
+                task["desc_item"].setEditable(False)
+        self.model.blockSignals(False)
+        
+        first_task_with_work = -1
+        for i, task_data in enumerate(self.tasks):
+            next_lang = self.queue_manager.get_next_language_to_process(task_data["path"])
+            if next_lang:
+                first_task_with_work = i
+                break
+                
+        if first_task_with_work == -1:
+            CustomMessageBox.information(self, "Queue Status", "No work remaining in queue.")
+            return
+            
+        self.current_task_index = first_task_with_work
+        self._process_task_at_index(self.current_task_index)
+        self.update_button_states()
+
     def _sync_ui_with_queue_state(self):
         queue_state = self.queue_manager.state.get("queue_state", {})
         
@@ -4010,7 +4175,6 @@ class MainWindow(FramelessWidget):
                 
                 for task in self.tasks:
                     if task["languages"] == old_languages:
-                        # Fix: Just update the task data - display is handled by the delegate
                         task["languages"] = self.selected_languages.copy()
                         
                         self.queue_manager.update_subtitle_languages(
@@ -4695,55 +4859,6 @@ class MainWindow(FramelessWidget):
         
         return task_data, model_row
 
-    def start_translation_queue(self):
-        key_status = self.validate_both_api_keys()
-        
-        if not key_status['key1_provided']:
-            CustomMessageBox.warning(self, "API Key Missing", "Please enter a primary Gemini API Key.")
-            self.api_key_edit.setFocus()
-            return
-        
-        if not key_status['key1_valid']:
-            CustomMessageBox.warning(self, "Invalid Primary API Key", 
-                                   "The primary API key is invalid. Please verify your key.")
-            self.api_key_edit.setFocus()
-            return
-        
-        if key_status['key2_provided'] and not key_status['key2_valid']:
-            CustomMessageBox.warning(self, "Invalid Secondary API Key", 
-                                   "The secondary API key is invalid. Please verify your key.")
-            self.api_key2_edit.setFocus()
-            return
-                
-        if self.active_thread and self.active_thread.isRunning():
-            CustomMessageBox.information(self, "In Progress", "A translation is already in progress.")
-            return
-        
-        if not self.queue_manager.has_any_work_remaining():
-            CustomMessageBox.information(self, "Queue Status", "No work remaining in queue.")
-            return
-            
-        self.model.blockSignals(True)
-        for task in self.tasks:
-            if task.get("desc_item"):
-                task["desc_item"].setEditable(False)
-        self.model.blockSignals(False)
-        
-        first_task_with_work = -1
-        for i, task_data in enumerate(self.tasks):
-            next_lang = self.queue_manager.get_next_language_to_process(task_data["path"])
-            if next_lang:
-                first_task_with_work = i
-                break
-                
-        if first_task_with_work == -1:
-            CustomMessageBox.information(self, "Queue Status", "No work remaining in queue.")
-            return
-            
-        self.current_task_index = first_task_with_work
-        self._process_task_at_index(self.current_task_index)
-        self.update_button_states()
-    
     def _process_task_at_index(self, task_idx):
         if not (0 <= task_idx < len(self.tasks)):
             self._handle_queue_finished()
@@ -4915,8 +5030,8 @@ class MainWindow(FramelessWidget):
         has_any_tasks = len(self.tasks) > 0
         has_tmdb_operations = bool(self.tmdb_lookup_workers) or bool(self.tmdb_queue)
         
-        key_status = self.validate_both_api_keys()
-        
+        is_validating = any(v == 'validating' for v in self.validation_states.values())
+
         if self.stop_after_current_task and is_processing:
             self.start_stop_btn.setText("Force Cancel Current Language")
             self.start_stop_btn.setEnabled(True)
@@ -4934,21 +5049,21 @@ class MainWindow(FramelessWidget):
             else:
                 self.start_stop_btn.setText("Fetching TMDB Info...")
             self.start_stop_btn.setEnabled(False)
+        elif is_validating:
+            self.start_stop_btn.setText("Validating API Keys...")
+            self.start_stop_btn.setEnabled(False)
         else:
-            if not key_status['key1_provided']:
-                self.start_stop_btn.setText("Missing Primary API Key")
-                self.start_stop_btn.setEnabled(False)
-            elif not key_status['key1_valid']:
+            if self.validation_states['gemini1'] == 'invalid':
                 self.start_stop_btn.setText("Invalid Primary API Key")
                 self.start_stop_btn.setEnabled(False)
-            elif key_status['key2_provided'] and not key_status['key2_valid']:
+            elif self.validation_states['gemini2'] == 'invalid':
                 self.start_stop_btn.setText("Invalid Secondary API Key")
                 self.start_stop_btn.setEnabled(False)
             else:
                 self.start_stop_btn.setText("Start Translating")
                 self.start_stop_btn.setEnabled(has_work_remaining)
         
-        is_busy = is_processing or self.is_running or has_tmdb_operations
+        is_busy = is_processing or self.is_running or has_tmdb_operations or is_validating
         
         self.clear_btn.setEnabled(has_any_tasks and not is_busy)
         self.custom_title_bar.language_selection_btn.setEnabled(not is_busy)
@@ -5249,66 +5364,6 @@ class MainWindow(FramelessWidget):
                     os.remove(os.path.join(app_dir, file))
         except:
             pass
-                
-    def validate_api_key_cached(self, api_key, key_number=1):
-        if key_number == 1:
-            if api_key == self.last_validated_key1 and self.api_key1_validated:
-                return True
-            cache_attr = 'api_key1_validated'
-            last_key_attr = 'last_validated_key1'
-        else:
-            if api_key == self.last_validated_key2 and self.api_key2_validated:
-                return True
-            cache_attr = 'api_key2_validated'
-            last_key_attr = 'last_validated_key2'
-        
-        if not api_key.strip() and key_number == 2:
-            setattr(self, cache_attr, True)
-            setattr(self, last_key_attr, api_key)
-            return True
-        
-        if len(api_key.strip()) < 35:
-            setattr(self, cache_attr, False)
-            return False
-        
-        try:
-            from google import genai
-            client = genai.Client(api_key=api_key.strip())
-            result = client.models.count_tokens(model="gemini-2.5-flash-lite-preview-06-17", contents="test")
-            
-            setattr(self, cache_attr, True)
-            setattr(self, last_key_attr, api_key)
-            return True
-        except Exception as e:
-            setattr(self, cache_attr, False)
-            print(f"API Key {key_number} validation failed: {e}")
-            return False
-    
-    def validate_both_api_keys(self):
-        key1 = self.api_key_edit.text().strip()
-        key2 = self.api_key2_edit.text().strip()
-        
-        key1_valid = self.validate_api_key_cached(key1, 1)
-        key2_valid = self.validate_api_key_cached(key2, 2) if key2 else True
-        
-        return {
-            'key1_valid': key1_valid,
-            'key2_valid': key2_valid,
-            'key1_provided': bool(key1),
-            'key2_provided': bool(key2),
-            'at_least_one_valid': key1_valid or (key2_valid and key2),
-            'both_provided_both_valid': key1_valid and key2_valid if key2 else key1_valid
-        }
-    
-    def on_api_key1_changed(self):
-        self.api_key1_validated = False
-        self.settings.update({"gemini_api_key": self.api_key_edit.text()})
-        self.update_button_states()
-    
-    def on_api_key2_changed(self):
-        self.api_key2_validated = False
-        self.settings.update({"gemini_api_key2": self.api_key2_edit.text()})
-        self.update_button_states()
         
     def refresh_tmdb_info(self):
         selected_rows = self._get_selected_task_rows()
@@ -5464,26 +5519,6 @@ class MainWindow(FramelessWidget):
                 break
         
         self.update_button_states()
-        
-    def on_tmdb_api_key_changed(self):
-        self.tmdb_api_key_validated = False
-        self.settings.update({"tmdb_api_key": self.tmdb_api_key_edit.text()})
-    
-    def validate_tmdb_api_key_cached(self, api_key):
-        if api_key == self.last_validated_tmdb_key and self.tmdb_api_key_validated:
-            return True
-        
-        if not api_key.strip():
-            self.tmdb_api_key_validated = True
-            self.last_validated_tmdb_key = api_key
-            return True
-        
-        is_valid = _validate_tmdb_api_key(api_key)
-        self.tmdb_api_key_validated = is_valid
-        if is_valid:
-            self.last_validated_tmdb_key = api_key
-        
-        return is_valid
         
     def _extract_movie_name_from_description(self, description):
         if not description:
