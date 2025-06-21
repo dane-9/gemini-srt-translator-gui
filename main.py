@@ -2220,12 +2220,12 @@ class SettingsDialog(CustomFramelessDialog):
             self.tmdb_content_widget.setStyleSheet("")
             
     def clear_tmdb_cache(self):
-        if hasattr(self.parent(), 'tmdb_cache'):
+        if self.parent_window and hasattr(self.parent_window, 'tmdb_cache'):
             reply = CustomMessageBox.question(self, "Clear TMDB Cache", 
-                                            "Clear all cached TMDB show data?\n\nThis will require re-downloading show information.",
+                                            "Clear all cached TMDB show data?\n\nThis will require additional API calls to fetch show information.",
                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.Yes:
-                self.parent().tmdb_cache.clear_cache()
+                self.parent_window.tmdb_cache.clear_cache()
                 CustomMessageBox.information(self, "Cache Cleared", "TMDB cache has been cleared.")
             
     def edit_movie_template(self):
