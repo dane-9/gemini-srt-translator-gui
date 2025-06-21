@@ -347,6 +347,22 @@ def _clean_filename_dots(filename):
         filename = filename.replace('..', '.')
     return filename
     
+def _files_are_pair(subtitle_path, video_path):
+    subtitle_dir = os.path.dirname(subtitle_path)
+    video_dir = os.path.dirname(video_path)
+    
+    if subtitle_dir != video_dir:
+        return False
+    
+    subtitle_info = _parse_subtitle_filename(os.path.basename(subtitle_path))
+    if not subtitle_info:
+        return False
+    
+    video_name = os.path.basename(video_path)
+    video_base = os.path.splitext(video_name)[0]
+    
+    return subtitle_info['base_name'] == video_base
+    
 def run_gst_translation_subprocess():
     parser = argparse.ArgumentParser(description="Run Gemini SRT Translator for a single file (subprocess mode).")
     parser.add_argument("--run-gst-subprocess", action="store_true", help=argparse.SUPPRESS)
@@ -640,6 +656,72 @@ class APIKeyValidator(QObject):
             is_valid = False
         finally:
             self.validation_finished.emit(self.key_id, is_valid)
+            
+class FileAdditionWorker(QObject):
+    finished = Signal(list)
+    status_update = Signal(str)
+
+    def __init__(self, file_paths):
+        super().__init__()
+        self.file_paths = file_paths
+
+    def run(self):
+        self.status_update.emit("Discovering Files...")
+        
+        video_files = [f for f in self.file_paths if is_video_file(f)]
+        subtitle_files = [f for f in self.file_paths if is_subtitle_file(f)]
+        
+        processed_files = set()
+        tasks_to_add = []
+        
+        for subtitle_path in subtitle_files:
+            if subtitle_path in processed_files:
+                continue
+                
+            video_pair = None
+            subtitle_base = os.path.splitext(os.path.basename(subtitle_path))[0]
+            subtitle_info = _parse_subtitle_filename(os.path.basename(subtitle_path))
+            
+            for video_path in video_files:
+                if video_path in processed_files:
+                    continue
+                    
+                if _files_are_pair(subtitle_path, video_path):
+                    video_pair = video_path
+                    break
+            
+            if video_pair:
+                task_type = "video+subtitle"
+                primary_file = subtitle_path
+                
+                processed_files.add(subtitle_path)
+                processed_files.add(video_pair)
+                
+                tasks_to_add.append({
+                    'primary_file': primary_file,
+                    'video_file': video_pair,
+                    'task_type': task_type,
+                    'requires_extraction': True
+                })
+            else:
+                processed_files.add(subtitle_path)
+                tasks_to_add.append({
+                    'primary_file': subtitle_path,
+                    'video_file': None,
+                    'task_type': 'subtitle',
+                    'requires_extraction': False
+                })
+        
+        for video_path in video_files:
+            if video_path not in processed_files:
+                tasks_to_add.append({
+                    'primary_file': video_path,
+                    'video_file': video_path,
+                    'task_type': 'video',
+                    'requires_extraction': False
+                })
+        
+        self.finished.emit(tasks_to_add)
         
 class TMDBLookupWorker(QObject):
     finished = Signal(str, str, bool)
@@ -3647,6 +3729,7 @@ class MainWindow(FramelessWidget):
         self.tasks = []
         self.current_task_index = -1
         self.settings = self._load_settings()
+        self.file_adder_thread = None
         self.active_thread = None
         self.active_worker = None
         self.clipboard_description = ""
@@ -4675,6 +4758,9 @@ class MainWindow(FramelessWidget):
                 self.queue_manager.clear_all_state()
 
     def add_files_action(self):
+        if self.file_adder_thread:
+            return
+
         files, _ = QFileDialog.getOpenFileNames(
             self, 
             "Select Subtitle or Video Files", 
@@ -4682,67 +4768,39 @@ class MainWindow(FramelessWidget):
             "Media Files (*.srt *.mp4 *.mkv *.avi *.mov);;SRT Files (*.srt);;Video Files (*.mp4 *.mkv *.avi *.mov);;All Files (*)"
         )
         if files:
-            video_files = [f for f in files if is_video_file(f)]
-            subtitle_files = [f for f in files if is_subtitle_file(f)]
+            worker = FileAdditionWorker(files)
+            thread = QThread()
             
-            processed_files = set()
-            tasks_to_add = []
+            self.file_adder_thread = (thread, worker) 
             
-            for subtitle_path in subtitle_files:
-                if subtitle_path in processed_files:
-                    continue
-                    
-                video_pair = None
-                for video_path in video_files:
-                    if video_path in processed_files:
-                        continue
-                        
-                    if self._files_are_pair(subtitle_path, video_path):
-                        video_pair = video_path
-                        break
-                
-                if video_pair:
-                    task_type = "video+subtitle"
-                    primary_file = subtitle_path
-                    
-                    processed_files.add(subtitle_path)
-                    processed_files.add(video_pair)
-                    
-                    tasks_to_add.append({
-                        'primary_file': primary_file,
-                        'video_file': video_pair,
-                        'task_type': task_type,
-                        'requires_extraction': True
-                    })
-                else:
-                    processed_files.add(subtitle_path)
-                    tasks_to_add.append({
-                        'primary_file': subtitle_path,
-                        'video_file': None,
-                        'task_type': 'subtitle',
-                        'requires_extraction': False
-                    })
+            worker.moveToThread(thread)
             
-            for video_path in video_files:
-                if video_path not in processed_files:
-                    tasks_to_add.append({
-                        'primary_file': video_path,
-                        'video_file': video_path,
-                        'task_type': 'video',
-                        'requires_extraction': False
-                    })
+            worker.status_update.connect(self.start_stop_btn.setText)
+            worker.finished.connect(self._on_files_processed)
+            thread.started.connect(worker.run)
+            worker.finished.connect(thread.quit)
+            thread.finished.connect(worker.deleteLater)
+            thread.finished.connect(self._on_file_adder_finished)
             
-            valid_tasks = []
-            for task_info in tasks_to_add:
-                primary_file = task_info['primary_file']
-                
-                if any(task['path'] == primary_file and task['languages'] == self.selected_languages for task in self.tasks):
-                    continue
-                
-                valid_tasks.append(task_info)
+            thread.start()
+            self.update_button_states()
+
+    def _on_files_processed(self, prepared_tasks):
+        valid_tasks = []
+        for task_info in prepared_tasks:
+            primary_file = task_info['primary_file']
             
-            if valid_tasks:
-                self._batch_add_tasks(valid_tasks)
+            if any(task['path'] == primary_file for task in self.tasks):
+                continue
+            
+            valid_tasks.append(task_info)
+        
+        if valid_tasks:
+            self._batch_add_tasks(valid_tasks)
+
+    def _on_file_adder_finished(self):
+        self.file_adder_thread = None
+        self.update_button_states()
     
     def _batch_add_tasks(self, tasks_info_list):
         files_for_tmdb = []
@@ -5027,6 +5085,7 @@ class MainWindow(FramelessWidget):
     def update_button_states(self):
         has_work_remaining = self.queue_manager.has_any_work_remaining()
         is_processing = self.active_thread is not None and self.active_thread.isRunning()
+        is_adding_files = self.file_adder_thread is not None and self.file_adder_thread[0].isRunning()
         has_any_tasks = len(self.tasks) > 0
         has_tmdb_operations = bool(self.tmdb_lookup_workers) or bool(self.tmdb_queue)
         
@@ -5038,6 +5097,9 @@ class MainWindow(FramelessWidget):
         elif self.is_running or is_processing:
             self.start_stop_btn.setText("Stop After Current Language")  
             self.start_stop_btn.setEnabled(True)
+        elif is_adding_files:
+            self.start_stop_btn.setText("Discovering Files...")
+            self.start_stop_btn.setEnabled(False)
         elif has_tmdb_operations:
             total_count = len(self.tmdb_lookup_workers)
             queued_count = len(self.tmdb_queue)
@@ -5063,8 +5125,9 @@ class MainWindow(FramelessWidget):
                 self.start_stop_btn.setText("Start Translating")
                 self.start_stop_btn.setEnabled(has_work_remaining)
         
-        is_busy = is_processing or self.is_running or has_tmdb_operations or is_validating
+        is_busy = is_processing or self.is_running or has_tmdb_operations or is_validating or is_adding_files
         
+        self.add_btn.setEnabled(not is_busy)
         self.clear_btn.setEnabled(has_any_tasks and not is_busy)
         self.custom_title_bar.language_selection_btn.setEnabled(not is_busy)
         self.custom_title_bar.settings_btn.setEnabled(not is_busy)
@@ -5220,22 +5283,6 @@ class MainWindow(FramelessWidget):
                 task_rows.append(index.row())
         
         return task_rows
-        
-    def _files_are_pair(self, subtitle_path, video_path):
-        subtitle_dir = os.path.dirname(subtitle_path)
-        video_dir = os.path.dirname(video_path)
-        
-        if subtitle_dir != video_dir:
-            return False
-        
-        subtitle_info = _parse_subtitle_filename(os.path.basename(subtitle_path))
-        if not subtitle_info:
-            return False
-        
-        video_name = os.path.basename(video_path)
-        video_base = os.path.splitext(video_name)[0]
-        
-        return subtitle_info['base_name'] == video_base
         
     def _cleanup_task_audio_and_extracted_files(self, task_path, scenario="success"):
         files_to_delete = set()
