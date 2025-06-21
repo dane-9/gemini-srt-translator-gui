@@ -23,6 +23,14 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKe
 from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QTimer, QItemSelectionModel, QRect, QModelIndex
 from window import FramelessWidget
 
+PathRole = Qt.UserRole + 1
+VideoPathRole = Qt.UserRole + 2
+DescriptionRole = Qt.UserRole + 3
+LanguagesRole = Qt.UserRole + 4
+TaskTypeRole = Qt.UserRole + 5
+DescriptionSourceRole = Qt.UserRole + 6
+TMDBTitleRole = Qt.UserRole + 7
+
 def is_compiled():
     result = os.path.normcase(os.path.splitext(sys.argv[0])[1]) == '.exe'
     return result
@@ -2601,15 +2609,12 @@ class CustomTaskModel(QStandardItemModel):
         self.main_window = main_window
     
     def get_secondary_info(self, index):
-        if index.column() != 0:
-            return ""
-        
-        row = index.row()
-        if row < len(self.main_window.tasks):
-            task = self.main_window.tasks[row]
-            task_type = task.get("task_type", "subtitle")
-            languages = task.get("languages", [])
+            if index.column() != 0:
+                return ""
             
+            task_type = index.data(TaskTypeRole) or "subtitle"
+            languages = index.data(LanguagesRole) or []
+    
             if task_type == "video+subtitle":
                 type_text = "Video+Subtitle"
             elif task_type == "video":
@@ -2619,19 +2624,12 @@ class CustomTaskModel(QStandardItemModel):
             
             lang_text = ", ".join(languages)
             return f"Type: {type_text}  Translating to: {lang_text}"
-        
-        return ""
     
     def get_description_source(self, index):
         if index.column() != 2:
             return ""
         
-        row = index.row()
-        if row < len(self.main_window.tasks):
-            task = self.main_window.tasks[row]
-            return task.get("description_source", "Manual")
-        
-        return "Manual"
+        return index.siblingAtColumn(0).data(DescriptionSourceRole) or "Manual"
 
 class TranslationWorker(QObject):
     finished = Signal(int, str, bool)
@@ -3746,7 +3744,6 @@ class MainWindow(FramelessWidget):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         
-        self.tasks = []
         self.current_task_index = -1
         self.settings = self._load_settings()
         self.file_adder_thread = None
@@ -3847,7 +3844,6 @@ class MainWindow(FramelessWidget):
         self.tree_view.sortByColumn(0, Qt.AscendingOrder)
         
         header = self.tree_view.header()
-        header.sortIndicatorChanged.connect(self._on_sort_indicator_changed)
         
         content_layout.addWidget(self.tree_view)
         
@@ -4049,14 +4045,17 @@ class MainWindow(FramelessWidget):
             return
             
         self.model.blockSignals(True)
-        for task in self.tasks:
-            if task.get("desc_item"):
-                task["desc_item"].setEditable(False)
+        for row in range(self.model.rowCount()):
+            item = self.model.item(row, 2)
+            if item:
+                item.setEditable(False)
         self.model.blockSignals(False)
         
         first_task_with_work = -1
-        for i, task_data in enumerate(self.tasks):
-            next_lang = self.queue_manager.get_next_language_to_process(task_data["path"])
+        for i in range(self.model.rowCount()):
+            index = self.model.index(i, 0)
+            task_path = index.data(PathRole)
+            next_lang = self.queue_manager.get_next_language_to_process(task_path)
             if next_lang:
                 first_task_with_work = i
                 break
@@ -4072,12 +4071,19 @@ class MainWindow(FramelessWidget):
     def _sync_ui_with_queue_state(self):
         queue_state = self.queue_manager.state.get("queue_state", {})
         
+        current_paths_in_model = set()
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            current_paths_in_model.add(index.data(PathRole))
+
         tasks_to_restore = []
-        
         for subtitle_path, subtitle_data in queue_state.items():
             if not os.path.exists(subtitle_path):
                 continue
-                
+            
+            if subtitle_path in current_paths_in_model:
+                continue
+
             target_languages = subtitle_data.get("target_languages", [])
             description = subtitle_data.get("description", "")
             tmdb_title = subtitle_data.get("tmdb_title", "")
@@ -4091,38 +4097,18 @@ class MainWindow(FramelessWidget):
                     subtitle_data["video_file"] = None
                     subtitle_data["requires_audio_extraction"] = False
                     self.queue_manager._save_queue_state()
+
+            model_row = self._prepare_model_row(subtitle_path, target_languages, description, task_type)
             
-            task_exists = any(task['path'] == subtitle_path and task['languages'] == target_languages for task in self.tasks)
+            if tmdb_title:
+                model_row[1].setText(tmdb_title)
+                model_row[1].setToolTip(tmdb_title)
+                model_row[2].setData("Auto", DescriptionSourceRole)
             
-            if not task_exists:
-                tasks_to_restore.append({
-                    'path': subtitle_path,
-                    'languages': target_languages,
-                    'description': description,
-                    'task_type': task_type,
-                    'tmdb_title': tmdb_title
-                })
-        
-        if tasks_to_restore:
-            for task_info in tasks_to_restore:
-                task_data, model_row = self._prepare_task_data(
-                    task_info['path'], 
-                    task_info['languages'], 
-                    task_info['description'], 
-                    task_info['task_type']
-                )
-                
-                self.model.appendRow(model_row)
-                self.tasks.append(task_data)
-                
-                if task_info['tmdb_title']:
-                    task_data["movie_item"].setText(task_info['tmdb_title'])
-                    task_data["movie_item"].setToolTip(task_info['tmdb_title'])
-                    task_data["tmdb_title"] = task_info['tmdb_title']
-                    task_data["description_source"] = "Auto"
-                
-                summary = self.queue_manager.get_language_progress_summary(task_info['path'])
-                task_data["status_item"].setText(summary)
+            summary = self.queue_manager.get_language_progress_summary(subtitle_path)
+            model_row[3].setText(summary)
+            
+            self.model.appendRow(model_row)
         
     def _get_language_display_text(self, lang_codes):
         if len(lang_codes) <= 2:
@@ -4135,8 +4121,9 @@ class MainWindow(FramelessWidget):
         if self.is_running:
             if self.stop_after_current_task:
                 current_task_name = ""
-                if 0 <= self.current_task_index < len(self.tasks):
-                    task_path = self.tasks[self.current_task_index]["path"]
+                if 0 <= self.current_task_index < self.model.rowCount():
+                    index = self.model.index(self.current_task_index, 0)
+                    task_path = index.data(PathRole)
                     current_task_name = os.path.basename(task_path)
                 
                 reply = CustomMessageBox.question(
@@ -4164,98 +4151,23 @@ class MainWindow(FramelessWidget):
 
     def on_item_changed(self, item):
         if item.column() == 2:
-            row = item.row()
-            if 0 <= row < len(self.tasks):
-                self.tasks[row]["description"] = item.text()
-                self.tasks[row]["description_source"] = "Manual"
-                item.setToolTip(item.text())
+            index = item.index()
+            self.model.setData(index, item.text(), DescriptionRole)
+            self.model.setData(index, "Manual", DescriptionSourceRole)
+            item.setToolTip(item.text())
 
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.Copy):
             current_index = self.tree_view.currentIndex()
-            if current_index.isValid() and current_index.column() == 3:
-                item = self.model.itemFromIndex(current_index)
-                if item:
-                    self.clipboard_description = item.text()
+            if current_index.isValid() and current_index.column() == 2:
+                self.clipboard_description = current_index.data(Qt.DisplayRole)
         elif event.matches(QKeySequence.Paste):
             current_index = self.tree_view.currentIndex()
-            if current_index.isValid() and current_index.column() == 3:
-                item = self.model.itemFromIndex(current_index)
-                if item:
-                    item.setText(self.clipboard_description)
-                    item.setToolTip(self.clipboard_description)
-                    row = current_index.row()
-                    if 0 <= row < len(self.tasks):
-                        self.tasks[row]["description"] = self.clipboard_description
+            if current_index.isValid() and current_index.column() == 2:
+                self.model.setData(current_index, self.clipboard_description)
+                self.model.setData(current_index.siblingAtColumn(0), self.clipboard_description, DescriptionRole)
         else:
             super().keyPressEvent(event)
-
-    def _on_sort_indicator_changed(self, logical_index, order):
-        if self.active_thread and self.active_thread.isRunning():
-            CustomMessageBox.warning(self, "Cannot Sort", 
-                              "Translation in progress. Stop it before sorting.")
-            self.tree_view.setSortingEnabled(False)
-            self._rebuild_model_from_tasks()
-            self.tree_view.setSortingEnabled(True)
-            return
-        
-        QTimer.singleShot(0, self._sync_tasks_with_sorted_model)
-
-    def _sync_tasks_with_sorted_model(self):
-        if self.active_thread and self.active_thread.isRunning():
-            return
-        
-        new_tasks = []
-        for row in range(self.model.rowCount()):
-            path_item = self.model.item(row, 0)
-            movie_item = self.model.item(row, 1)
-            desc_item = self.model.item(row, 2)
-            status_item = self.model.item(row, 3)
-            
-            for task in self.tasks:
-                if (task["path_item"] is path_item and 
-                    task["movie_item"] is movie_item and
-                    task["desc_item"] is desc_item and
-                    task["status_item"] is status_item):
-                    new_tasks.append(task)
-                    break
-        
-        self.tasks = new_tasks
-        self.current_task_index = -1
-
-    def _rebuild_model_from_tasks(self):
-        col_widths = []
-        for i in range(self.model.columnCount()):
-            col_widths.append(self.tree_view.columnWidth(i))
-        
-        header = self.tree_view.header()
-        sort_column = header.sortIndicatorSection()
-        sort_order = header.sortIndicatorOrder()
-        
-        was_sorting_enabled = self.tree_view.isSortingEnabled()
-        self.tree_view.setSortingEnabled(False)
-        
-        self.model.clear()
-        self.model.setHorizontalHeaderLabels(["Files", "Title", "Description", "Status"])
-        
-        for task in self.tasks:
-            self.model.appendRow([task["path_item"], task["movie_item"], task["desc_item"], task["status_item"]])
-            
-            if task.get("task_type") == "video+subtitle" and task["path_item"].rowCount() == 0:
-                subtitle_path = task["path"]
-                subtitle_child = QStandardItem(f"{os.path.basename(subtitle_path)}")
-                subtitle_child.setToolTip(f"Subtitle: {subtitle_path}")
-                subtitle_child.setEditable(False)
-                task["path_item"].appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
-        
-        for i, width in enumerate(col_widths):
-            if i < self.model.columnCount():
-                self.tree_view.setColumnWidth(i, width)
-        
-        if was_sorting_enabled:
-            self.tree_view.setSortingEnabled(True)
-            if sort_column >= 0:
-                self.tree_view.sortByColumn(sort_column, sort_order)
     
     def _format_language_tooltip(self, lang_codes, max_display=5):
         language_names = self._get_language_names_from_codes(lang_codes)
@@ -4276,14 +4188,15 @@ class MainWindow(FramelessWidget):
             if (old_languages != self.selected_languages and 
                 self.settings.get("update_existing_queue_languages", True)):
                 
-                for task in self.tasks:
-                    if task["languages"] == old_languages:
-                        task["languages"] = self.selected_languages.copy()
+                for row in range(self.model.rowCount()):
+                    index = self.model.index(row, 0)
+                    if index.data(LanguagesRole) == old_languages:
+                        self.model.setData(index, self.selected_languages.copy(), LanguagesRole)
                         
                         self.queue_manager.update_subtitle_languages(
-                            task["path"], 
+                            index.data(PathRole), 
                             self.selected_languages, 
-                            task["description"],
+                            index.data(DescriptionRole),
                             self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
                         )
                 
@@ -4299,11 +4212,11 @@ class MainWindow(FramelessWidget):
         if self.active_thread and self.active_thread.isRunning():
             return
             
-        item = self.tree_view.indexAt(position)
-        if not item.isValid():
+        index = self.tree_view.indexAt(position)
+        if not index.isValid():
             return
         
-        if item.parent().isValid():
+        if index.parent().isValid():
             return
         
         selected_rows = self._get_selected_task_rows()
@@ -4317,13 +4230,12 @@ class MainWindow(FramelessWidget):
             edit_desc_action.triggered.connect(self.edit_single_description)
             menu.addAction(edit_desc_action)
             
-            row = selected_rows[0]
-            if 0 <= row < len(self.tasks):
-                current_desc = self.tasks[row]["description"]
-                if current_desc:
-                    copy_desc_action = QAction("Copy Description", self)
-                    copy_desc_action.triggered.connect(self.copy_description)
-                    menu.addAction(copy_desc_action)
+            current_index = self.model.index(selected_rows[0], 0)
+            current_desc = current_index.data(DescriptionRole)
+            if current_desc:
+                copy_desc_action = QAction("Copy Description", self)
+                copy_desc_action.triggered.connect(self.copy_description)
+                menu.addAction(copy_desc_action)
         
         if len(selected_rows) > 1:
             bulk_edit_action = QAction("Bulk Edit Description", self)
@@ -4333,11 +4245,10 @@ class MainWindow(FramelessWidget):
         if self.clipboard_description:
             should_show_apply = True
             if len(selected_rows) == 1:
-                row = selected_rows[0]
-                if 0 <= row < len(self.tasks):
-                    current_desc = self.tasks[row]["description"]
-                    if current_desc == self.clipboard_description:
-                        should_show_apply = False
+                current_index = self.model.index(selected_rows[0], 0)
+                current_desc = current_index.data(DescriptionRole)
+                if current_desc == self.clipboard_description:
+                    should_show_apply = False
             
             if should_show_apply:
                 preview = self.clipboard_description[:10] + "..." if len(self.clipboard_description) > 10 else self.clipboard_description
@@ -4385,10 +4296,10 @@ class MainWindow(FramelessWidget):
         
         has_non_queued = False
         for row in selected_rows:
-            if 0 <= row < len(self.tasks):
-                if self.tasks[row]["status_item"].text() != "Queued":
-                    has_non_queued = True
-                    break
+            status_item = self.model.item(row, 3)
+            if status_item and status_item.text() != "Queued":
+                has_non_queued = True
+                break
         
         if has_non_queued:
             reset_action = QAction("Reset Status", self)
@@ -4400,69 +4311,50 @@ class MainWindow(FramelessWidget):
     def copy_description(self):
         selected_rows = self._get_selected_task_rows()
         if len(selected_rows) == 1:
-            row = selected_rows[0]
-            if 0 <= row < len(self.tasks):
-                self.clipboard_description = self.tasks[row]["description"]
-    
+            index = self.model.index(selected_rows[0], 0)
+            self.clipboard_description = index.data(DescriptionRole)
+
     def apply_copied_description(self):
         if not self.clipboard_description:
             return
         
         selected_rows = self._get_selected_task_rows()
         for row in selected_rows:
-            if 0 <= row < len(self.tasks):
-                self.tasks[row]["desc_item"].setText(self.clipboard_description)
-                self.tasks[row]["desc_item"].setToolTip(self.clipboard_description)
-                self.tasks[row]["description"] = self.clipboard_description
-                self.tasks[row]["description_source"] = "Manual"
-    
+            desc_index = self.model.index(row, 2)
+            self.model.setData(desc_index, self.clipboard_description)
+            self.model.setData(desc_index.siblingAtColumn(0), self.clipboard_description, DescriptionRole)
+            self.model.setData(desc_index.siblingAtColumn(0), "Manual", DescriptionSourceRole)
+
     def edit_single_description(self):
         selected_rows = self._get_selected_task_rows()
         if len(selected_rows) != 1:
             return
         
-        row = selected_rows[0]
-        if 0 <= row < len(self.tasks):
-            current_desc = self.tasks[row]["description"]
-            dialog = BulkDescriptionDialog(current_desc, self)
-            dialog.setWindowTitle("Edit Description")
-            if dialog.exec():
-                new_description = dialog.get_description()
-                self.tasks[row]["desc_item"].setText(new_description)
-                self.tasks[row]["desc_item"].setToolTip(new_description)
-                self.tasks[row]["description"] = new_description
-                self.tasks[row]["description_source"] = "Manual"
-    
+        index = self.model.index(selected_rows[0], 0)
+        current_desc = index.data(DescriptionRole)
+        
+        dialog = BulkDescriptionDialog(current_desc, self)
+        dialog.setWindowTitle("Edit Description")
+        if dialog.exec():
+            new_description = dialog.get_description()
+            desc_index = self.model.index(selected_rows[0], 2)
+            self.model.setData(desc_index, new_description)
+            self.model.setData(desc_index.siblingAtColumn(0), new_description, DescriptionRole)
+            self.model.setData(desc_index.siblingAtColumn(0), "Manual", DescriptionSourceRole)
+
     def bulk_edit_description(self):
         selected_rows = self._get_selected_task_rows()
         if not selected_rows:
             return
         
-        current_desc = ""
-        if len(selected_rows) == 1:
-            row = selected_rows[0]
-            if 0 <= row < len(self.tasks):
-                current_desc = self.tasks[row]["description"]
-        else:
-            descriptions = []
-            for row in selected_rows:
-                if 0 <= row < len(self.tasks):
-                    desc = self.tasks[row]["description"]
-                    if desc:
-                        descriptions.append(desc)
-            
-            if len(descriptions) == 1:
-                current_desc = descriptions[0]
-        
-        dialog = BulkDescriptionDialog(current_desc, self)
+        dialog = BulkDescriptionDialog("", self)
         if dialog.exec():
             new_description = dialog.get_description()
             for row in selected_rows:
-                if 0 <= row < len(self.tasks):
-                    self.tasks[row]["desc_item"].setText(new_description)
-                    self.tasks[row]["desc_item"].setToolTip(new_description)
-                    self.tasks[row]["description"] = new_description
-                    self.tasks[row]["description_source"] = "Manual"
+                desc_index = self.model.index(row, 2)
+                self.model.setData(desc_index, new_description)
+                self.model.setData(desc_index.siblingAtColumn(0), new_description, DescriptionRole)
+                self.model.setData(desc_index.siblingAtColumn(0), "Manual", DescriptionSourceRole)
 
     def move_selected_to_top(self):
         if self.active_thread and self.active_thread.isRunning():
@@ -4474,19 +4366,11 @@ class MainWindow(FramelessWidget):
         
         rows = sorted([index.row() for index in selected_indexes])
         
-        selected_tasks = [self.tasks[row] for row in rows if 0 <= row < len(self.tasks)]
-        
-        for row in reversed(rows):
-            if 0 <= row < len(self.tasks):
-                self.tasks.pop(row)
-        
-        for i, task in enumerate(selected_tasks):
-            self.tasks.insert(i, task)
-        
-        self._rebuild_model_from_tasks()
-        
+        for i, row in enumerate(rows):
+            self.model.insertRow(i, self.model.takeRow(row))
+            
         self.tree_view.clearSelection()
-        for i in range(len(selected_tasks)):
+        for i in range(len(rows)):
             self.tree_view.selectionModel().select(
                 self.model.index(i, 0), 
                 QItemSelectionModel.Select | QItemSelectionModel.Rows
@@ -4504,13 +4388,10 @@ class MainWindow(FramelessWidget):
         
         if rows[0] == 0:
             return
-        
+            
         for row in rows:
-            if row > 0:
-                self.tasks[row], self.tasks[row-1] = self.tasks[row-1], self.tasks[row]
-        
-        self._rebuild_model_from_tasks()
-        
+            self.model.insertRow(row - 1, self.model.takeRow(row))
+
         self.tree_view.clearSelection()
         for row in rows:
             new_row = max(0, row - 1)
@@ -4529,18 +4410,15 @@ class MainWindow(FramelessWidget):
         
         rows = sorted([index.row() for index in selected_indexes], reverse=True)
         
-        if rows[0] >= len(self.tasks) - 1:
+        if rows[0] >= self.model.rowCount() - 1:
             return
-        
+
         for row in rows:
-            if row < len(self.tasks) - 1:
-                self.tasks[row], self.tasks[row+1] = self.tasks[row+1], self.tasks[row]
-        
-        self._rebuild_model_from_tasks()
-        
+            self.model.insertRow(row + 1, self.model.takeRow(row))
+
         self.tree_view.clearSelection()
         for row in reversed(rows):
-            new_row = min(len(self.tasks) - 1, row + 1)
+            new_row = min(self.model.rowCount() - 1, row + 1)
             self.tree_view.selectionModel().select(
                 self.model.index(new_row, 0), 
                 QItemSelectionModel.Select | QItemSelectionModel.Rows
@@ -4556,25 +4434,17 @@ class MainWindow(FramelessWidget):
         
         rows = sorted([index.row() for index in selected_indexes], reverse=True)
         
-        selected_tasks = []
-        for row in rows:
-            if 0 <= row < len(self.tasks):
-                selected_tasks.append(self.tasks.pop(row))
+        taken_rows = [self.model.takeRow(row) for row in rows]
         
-        selected_tasks.reverse()
-        
-        start_index = len(self.tasks)
-        for task in selected_tasks:
-            self.tasks.append(task)
-        
-        self._rebuild_model_from_tasks()
+        for row_items in reversed(taken_rows):
+            self.model.appendRow(row_items)
         
         self.tree_view.clearSelection()
-        for i in range(len(selected_tasks)):
-            row_index = start_index + i
+        start_index = self.model.rowCount() - len(rows)
+        for i in range(len(rows)):
             self.tree_view.selectionModel().select(
-                self.model.index(row_index, 0), 
-                self.tree_view.selectionModel().Select | self.tree_view.selectionModel().Rows
+                self.model.index(start_index + i, 0), 
+                QItemSelectionModel.Select | QItemSelectionModel.Rows
             )
 
     def remove_selected_items(self):
@@ -4588,15 +4458,12 @@ class MainWindow(FramelessWidget):
         rows_to_remove = sorted([index.row() for index in selected_indexes], reverse=True)
         
         for row in rows_to_remove:
-            if 0 <= row < len(self.tasks):
-                task = self.tasks[row]
-                
-                self._cleanup_task_audio_and_extracted_files(task["path"], "remove")
-                
-                self.queue_manager.remove_subtitle_from_queue(task["path"])
-                
-                self.tasks.pop(row)
-                self.model.removeRow(row)
+            index = self.model.index(row, 0)
+            task_path = index.data(PathRole)
+            
+            self._cleanup_task_audio_and_extracted_files(task_path, "remove")
+            self.queue_manager.remove_subtitle_from_queue(task_path)
+            self.model.removeRow(row)
         
         self.update_button_states()
 
@@ -4604,80 +4471,76 @@ class MainWindow(FramelessWidget):
         if self.active_thread and self.active_thread.isRunning():
             return
             
-        selected_indexes = self.tree_view.selectionModel().selectedRows()
-        if not selected_indexes:
-            return
-        
         selected_rows = self._get_selected_task_rows()
         if not selected_rows:
             return
         
         reset_count = 0
         for row in selected_rows:
-            if 0 <= row < len(self.tasks):
-                task = self.tasks[row]
-                task_path = task["path"]
-                current_status = task["status_item"].text()
+            status_item = self.model.item(row, 3)
+            index = self.model.index(row, 0)
+            task_path = index.data(PathRole)
+            current_status = status_item.text()
+            
+            if current_status != "Queued":
+                status_item.setText("Queued")
                 
-                if current_status != "Queued":
-                    task["status_item"].setText("Queued")
-                    
-                    if task_path in self.queue_manager.state["queue_state"]:
-                        languages = self.queue_manager.state["queue_state"][task_path].get("languages", {})
-                        for lang_code in languages.keys():
-                            self.queue_manager.mark_language_queued(task_path, lang_code)
-                    
-                    original_basename = os.path.basename(task_path)
-                    original_dir = os.path.dirname(task_path)
-                    
-                    subtitle_parsed = _parse_subtitle_filename(original_basename)
-                    if subtitle_parsed and subtitle_parsed['base_name']:
-                        name_part = subtitle_parsed['base_name']
-                    else:
-                        name_part = _strip_language_codes_from_name(os.path.splitext(original_basename)[0])
-                    
-                    progress_file = os.path.join(original_dir, f"{name_part}.progress")
-                    if os.path.exists(progress_file):
-                        try:
-                            os.remove(progress_file)
-                        except Exception as e:
-                            pass
-                            
-                    extracted_subtitle = self.queue_manager.get_extracted_subtitle_file(task_path)
-                    if extracted_subtitle and os.path.exists(extracted_subtitle):
-                        try:
-                            os.remove(extracted_subtitle)
-                        except Exception as e:
-                            pass
-                    
-                    should_cleanup_audio = self.settings.get("cleanup_audio_on_cancel", False)
-                    if should_cleanup_audio:
-                        audio_file = self.queue_manager.get_extracted_audio_file(task_path)
-                        if audio_file and os.path.exists(audio_file):
-                            try:
-                                os.remove(audio_file)
-                            except Exception as e:
-                                pass
+                if task_path in self.queue_manager.state["queue_state"]:
+                    languages = self.queue_manager.state["queue_state"][task_path].get("languages", {})
+                    for lang_code in languages.keys():
+                        self.queue_manager.mark_language_queued(task_path, lang_code)
+                
+                original_basename = os.path.basename(task_path)
+                original_dir = os.path.dirname(task_path)
+                
+                subtitle_parsed = _parse_subtitle_filename(original_basename)
+                if subtitle_parsed and subtitle_parsed['base_name']:
+                    name_part = subtitle_parsed['base_name']
+                else:
+                    name_part = _strip_language_codes_from_name(os.path.splitext(original_basename)[0])
+                
+                progress_file = os.path.join(original_dir, f"{name_part}.progress")
+                if os.path.exists(progress_file):
+                    try:
+                        os.remove(progress_file)
+                    except Exception as e:
+                        pass
                         
-                        self.queue_manager.cleanup_extracted_audio(task_path)
-                    else:
-                        if task_path in self.queue_manager.state["queue_state"]:
-                            self.queue_manager.state["queue_state"][task_path]["extracted_subtitle_file"] = None
-                            self.queue_manager._save_queue_state()
+                extracted_subtitle = self.queue_manager.get_extracted_subtitle_file(task_path)
+                if extracted_subtitle and os.path.exists(extracted_subtitle):
+                    try:
+                        os.remove(extracted_subtitle)
+                    except Exception as e:
+                        pass
+                
+                should_cleanup_audio = self.settings.get("cleanup_audio_on_cancel", False)
+                if should_cleanup_audio:
+                    audio_file = self.queue_manager.get_extracted_audio_file(task_path)
+                    if audio_file and os.path.exists(audio_file):
+                        try:
+                            os.remove(audio_file)
+                        except Exception as e:
+                            pass
                     
+                    self.queue_manager.cleanup_extracted_audio(task_path)
+                else:
                     if task_path in self.queue_manager.state["queue_state"]:
-                        queue_entry = self.queue_manager.state["queue_state"][task_path]
-                        if queue_entry.get("requires_audio_extraction", False):
-                            if should_cleanup_audio:
-                                self.queue_manager.set_audio_extraction_status(task_path, "pending")
+                        self.queue_manager.state["queue_state"][task_path]["extracted_subtitle_file"] = None
+                        self.queue_manager._save_queue_state()
+                
+                if task_path in self.queue_manager.state["queue_state"]:
+                    queue_entry = self.queue_manager.state["queue_state"][task_path]
+                    if queue_entry.get("requires_audio_extraction", False):
+                        if should_cleanup_audio:
+                            self.queue_manager.set_audio_extraction_status(task_path, "pending")
+                        else:
+                            audio_file = self.queue_manager.get_extracted_audio_file(task_path)
+                            if audio_file and os.path.exists(audio_file):
+                                self.queue_manager.set_audio_extraction_status(task_path, "completed", audio_file)
                             else:
-                                audio_file = self.queue_manager.get_extracted_audio_file(task_path)
-                                if audio_file and os.path.exists(audio_file):
-                                    self.queue_manager.set_audio_extraction_status(task_path, "completed", audio_file)
-                                else:
-                                    self.queue_manager.set_audio_extraction_status(task_path, "pending")
-                    
-                    reset_count += 1
+                                self.queue_manager.set_audio_extraction_status(task_path, "pending")
+                
+                reset_count += 1
         
         if reset_count > 0:
             self.update_button_states()
@@ -4716,8 +4579,9 @@ class MainWindow(FramelessWidget):
         self._save_settings()
         if self.active_thread and self.active_thread.isRunning():
             current_task_name = ""
-            if 0 <= self.current_task_index < len(self.tasks):
-                task_path = self.tasks[self.current_task_index]["path"]
+            if 0 <= self.current_task_index < self.model.rowCount():
+                index = self.model.index(self.current_task_index, 0)
+                task_path = index.data(PathRole)
                 current_task_name = f"\n\nCurrent file: {os.path.basename(task_path)}"
             
             reply = CustomMessageBox.question(
@@ -4753,27 +4617,23 @@ class MainWindow(FramelessWidget):
     def _perform_exit(self):
         queue_on_exit = self.settings.get("queue_on_exit", "clear_if_translated")
         
-        for task in self.tasks:
-            task_path = task["path"]
+        all_translated = True
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            task_path = index.data(PathRole)
+            summary = self.queue_manager.get_language_progress_summary(task_path)
+            if summary != "Translated":
+                all_translated = False
+
             extracted_subtitle_file = self.queue_manager.get_extracted_subtitle_file(task_path)
             if extracted_subtitle_file and os.path.exists(extracted_subtitle_file):
                 try:
                     os.remove(extracted_subtitle_file)
                 except Exception as e:
                     pass
-        
-        if queue_on_exit == "clear":
+
+        if queue_on_exit == "clear" or (queue_on_exit == "clear_if_translated" and all_translated):
             self.queue_manager.clear_all_state()
-        elif queue_on_exit == "clear_if_translated":
-            all_translated = True
-            for task in self.tasks:
-                summary = self.queue_manager.get_language_progress_summary(task["path"])
-                if summary != "Translated":
-                    all_translated = False
-                    break
-            
-            if all_translated:
-                self.queue_manager.clear_all_state()
 
     def add_files_action(self):
         if self.file_adder_thread:
@@ -4811,31 +4671,33 @@ class MainWindow(FramelessWidget):
         new_subtitles = [(i, task) for i, task in enumerate(prepared_tasks) if task['task_type'] == 'subtitle']
         new_videos = [(i, task) for i, task in enumerate(prepared_tasks) if task['task_type'] == 'video']
 
-        for task_idx, existing_task in enumerate(self.tasks):
-            if existing_task['task_type'] == 'video':
+        for task_idx in range(self.model.rowCount()):
+            index = self.model.index(task_idx, 0)
+            task_type = index.data(TaskTypeRole)
+            
+            if task_type == 'video':
                 for i, new_sub_task_info in new_subtitles:
                     if i in handled_new_tasks_indices: continue
-                    if _files_are_pair(new_sub_task_info['primary_file'], existing_task['path']):
-                        self._update_task_to_video_subtitle(task_idx, new_sub_task_info['primary_file'], existing_task['path'])
+                    if _files_are_pair(new_sub_task_info['primary_file'], index.data(PathRole)):
+                        self._update_task_to_video_subtitle(task_idx, new_sub_task_info['primary_file'], index.data(PathRole))
                         handled_new_tasks_indices.add(i)
                         break
             
-            elif existing_task['task_type'] == 'subtitle':
+            elif task_type == 'subtitle':
                 for i, new_vid_task_info in new_videos:
                     if i in handled_new_tasks_indices: continue
-                    if _files_are_pair(existing_task['path'], new_vid_task_info['primary_file']):
-                        self._update_task_to_video_subtitle(task_idx, existing_task['path'], new_vid_task_info['primary_file'])
+                    if _files_are_pair(index.data(PathRole), new_vid_task_info['primary_file']):
+                        self._update_task_to_video_subtitle(task_idx, index.data(PathRole), new_vid_task_info['primary_file'])
                         handled_new_tasks_indices.add(i)
                         break
+
+        existing_paths = {self.model.index(row, 0).data(PathRole) for row in range(self.model.rowCount())}
 
         for i, task_info in enumerate(prepared_tasks):
             if i in handled_new_tasks_indices:
                 continue
             
-            if any(t['path'] == task_info['primary_file'] for t in self.tasks):
-                continue
-
-            if task_info['task_type'] == 'video+subtitle' and any(t['path'] == task_info['primary_file'] for t in self.tasks):
+            if task_info['primary_file'] in existing_paths:
                 continue
             
             unmatched_new_tasks.append(task_info)
@@ -4849,8 +4711,6 @@ class MainWindow(FramelessWidget):
     
     def _batch_add_tasks(self, tasks_info_list):
         files_for_tmdb = []
-        new_tasks = []
-        new_model_rows = []
         
         for task_info in tasks_info_list:
             primary_file = task_info['primary_file']
@@ -4865,17 +4725,17 @@ class MainWindow(FramelessWidget):
                 task_info['requires_extraction']
             )
             
-            task_data, model_row = self._prepare_task_data(primary_file, self.selected_languages.copy(), "", task_info['task_type'])
-            new_tasks.append(task_data)
-            new_model_rows.append(model_row)
+            model_row = self._prepare_model_row(
+                primary_file, 
+                self.selected_languages.copy(), 
+                "", 
+                task_info['task_type']
+            )
+            self.model.appendRow(model_row)
             
             video_file_for_lookup = task_info.get('video_file', primary_file)
             files_for_tmdb.append(video_file_for_lookup if video_file_for_lookup != primary_file else primary_file)
-        
-        for row in new_model_rows:
-            self.model.appendRow(row)
-        
-        self.tasks.extend(new_tasks)
+
         self.update_button_states()
         
         for file_path in files_for_tmdb:
@@ -4883,99 +4743,63 @@ class MainWindow(FramelessWidget):
         
         self._process_tmdb_queue()
     
-    def _prepare_task_data(self, file_path, languages, description, task_type="subtitle"):
+    def _prepare_model_row(self, file_path, languages, description, task_type="subtitle"):
+        video_path = None
+        subtitle_path_for_data = file_path
+
         if task_type == "video+subtitle":
             if is_video_file(file_path):
                 video_path = file_path
-                subtitle_path = self._find_subtitle_pair(file_path)
+                subtitle_path_for_data = self._find_subtitle_pair(file_path) or file_path
             else:
-                subtitle_path = file_path
+                subtitle_path_for_data = file_path
                 video_path = self._find_video_pair(file_path)
-            
-            path_item = QStandardItem(os.path.basename(video_path))
-            path_item.setToolTip(os.path.dirname(video_path))
-            path_item.setEditable(False)
-            
-            movie_item = QStandardItem("")
-            movie_item.setEditable(False)
-            
-            desc_item = QStandardItem(description)
-            desc_item.setEditable(True)
-            desc_item.setToolTip(description)
-            
-            status_item = QStandardItem("Queued")
-            status_item.setEditable(False)
-            
-            subtitle_child = QStandardItem(f"{os.path.basename(subtitle_path)}")
-            subtitle_child.setToolTip(f"Subtitle: {subtitle_path}")
+        
+        display_name = os.path.basename(video_path) if video_path else os.path.basename(file_path)
+        
+        path_item = QStandardItem(display_name)
+        path_item.setToolTip(os.path.dirname(file_path))
+        path_item.setEditable(False)
+        path_item.setData(subtitle_path_for_data, PathRole)
+        path_item.setData(video_path, VideoPathRole)
+        path_item.setData(description, DescriptionRole)
+        path_item.setData(languages, LanguagesRole)
+        path_item.setData(task_type, TaskTypeRole)
+        path_item.setData("Manual", DescriptionSourceRole)
+        
+        movie_item = QStandardItem("")
+        movie_item.setEditable(False)
+        
+        desc_item = QStandardItem(description)
+        desc_item.setEditable(True)
+        desc_item.setToolTip(description)
+        
+        status_item = QStandardItem("Queued")
+        status_item.setEditable(False)
+        
+        if task_type == "video+subtitle":
+            subtitle_child = QStandardItem(f"{os.path.basename(subtitle_path_for_data)}")
+            subtitle_child.setToolTip(f"Subtitle: {subtitle_path_for_data}")
             subtitle_child.setEditable(False)
-            
             path_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
             
-            task_data = {
-                "path": subtitle_path,
-                "video_path": video_path,
-                "path_item": path_item, 
-                "movie_item": movie_item,
-                "desc_item": desc_item, 
-                "status_item": status_item, 
-                "description": description,
-                "description_source": "Manual",
-                "languages": languages.copy(),
-                "task_type": task_type,
-                "worker": None, 
-                "thread": None
-            }
-            
-            model_row = [path_item, movie_item, desc_item, status_item]
-            
-        else:
-            path_item = QStandardItem(os.path.basename(file_path))
-            path_item.setToolTip(os.path.dirname(file_path))
-            path_item.setEditable(False)
-            
-            movie_item = QStandardItem("")
-            movie_item.setEditable(False)
-            
-            desc_item = QStandardItem(description)
-            desc_item.setEditable(True)
-            desc_item.setToolTip(description)
-            
-            status_item = QStandardItem("Queued")
-            status_item.setEditable(False)
-            
-            task_data = {
-                "path": file_path, 
-                "path_item": path_item, 
-                "movie_item": movie_item,
-                "desc_item": desc_item, 
-                "status_item": status_item, 
-                "description": description,
-                "description_source": "Manual",
-                "languages": languages.copy(),
-                "task_type": task_type,
-                "worker": None, 
-                "thread": None
-            }
-            
-            model_row = [path_item, movie_item, desc_item, status_item]
-        
-        return task_data, model_row
+        return [path_item, movie_item, desc_item, status_item]
 
     def _process_task_at_index(self, task_idx):
-        if not (0 <= task_idx < len(self.tasks)):
+        if not (0 <= task_idx < self.model.rowCount()):
             self._handle_queue_finished()
             return
-            
-        task = self.tasks[task_idx]
         
-        next_lang = self.queue_manager.get_next_language_to_process(task["path"])
+        index = self.model.index(task_idx, 0)
+        task_path = index.data(PathRole)
+        
+        next_lang = self.queue_manager.get_next_language_to_process(task_path)
         if not next_lang:
             self._find_and_process_next_queued_task()
             return
             
         self.current_task_index = task_idx
-        task["status_item"].setText("Preparing")
+        self.model.item(task_idx, 3).setText("Preparing")
         self.overall_progress_bar.setVisible(True)
         self.overall_progress_bar.setValue(0)
         self.overall_progress_bar.setFormat("Starting...")
@@ -4983,13 +4807,13 @@ class MainWindow(FramelessWidget):
         
         self.active_worker = TranslationWorker(
             task_index=task_idx, 
-            input_file_path=task["path"], 
-            target_languages=task["languages"],
+            input_file_path=task_path, 
+            target_languages=index.data(LanguagesRole),
             api_key=self.api_key_edit.text().strip(), 
             api_key2=self.api_key2_edit.text().strip(),
             model_name=self.model_name_edit.text().strip(), 
             settings=self.settings,
-            description=task["description"],
+            description=index.data(DescriptionRole),
             queue_manager=self.queue_manager,
             main_window=self
         )
@@ -5015,8 +4839,10 @@ class MainWindow(FramelessWidget):
             self._handle_queue_finished()
             return
             
-        for i, task in enumerate(self.tasks):
-            next_lang = self.queue_manager.get_next_language_to_process(task["path"])
+        for i in range(self.model.rowCount()):
+            index = self.model.index(i, 0)
+            task_path = index.data(PathRole)
+            next_lang = self.queue_manager.get_next_language_to_process(task_path)
             if next_lang:
                 self._process_task_at_index(i)
                 return
@@ -5033,21 +4859,20 @@ class MainWindow(FramelessWidget):
 
     @Slot(int, str)
     def on_worker_status_message(self, task_idx, message):
-        if 0 <= task_idx < len(self.tasks) and self.current_task_index == task_idx:
-            self.tasks[task_idx]["status_item"].setText(message)
+        if 0 <= task_idx < self.model.rowCount() and self.current_task_index == task_idx:
+            self.model.item(task_idx, 3).setText(message)
 
-    @Slot(int, int, str)
     def on_worker_progress_update(self, task_idx, percentage, progress_text):
-        if 0 <= task_idx < len(self.tasks):
+        if 0 <= task_idx < self.model.rowCount():
             if self.current_task_index == task_idx:
                 self.overall_progress_bar.setValue(percentage)
                 self.overall_progress_bar.setFormat(progress_text)
 
-    @Slot(int, str, bool)
     def on_worker_finished(self, task_idx, message, success):
-        if 0 <= task_idx < len(self.tasks):
-            task_path = self.tasks[task_idx]["path"]
-            self.tasks[task_idx]["status_item"].setText(message)
+        if 0 <= task_idx < self.model.rowCount():
+            index = self.model.index(task_idx, 0)
+            task_path = index.data(PathRole)
+            self.model.item(task_idx, 3).setText(message)
             
             self.queue_manager.sync_audio_extraction_status(task_path)
             
@@ -5111,7 +4936,6 @@ class MainWindow(FramelessWidget):
             
             self.queue_manager.clear_all_state()
             
-            self.tasks.clear()
             self.model.removeRows(0, self.model.rowCount())
             self.current_task_index = -1
             self.overall_progress_bar.setVisible(False)
@@ -5121,8 +4945,9 @@ class MainWindow(FramelessWidget):
             self.update_button_states()
     
     def _cleanup_incomplete_task_files(self):
-        for task in self.tasks:
-            task_path = task["path"]
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            task_path = index.data(PathRole)
             
             summary = self.queue_manager.get_language_progress_summary(task_path)
             if summary == "Translated":
@@ -5221,7 +5046,9 @@ class MainWindow(FramelessWidget):
         has_work_remaining = self.queue_manager.has_any_work_remaining()
         is_processing = self.active_thread is not None and self.active_thread.isRunning()
         is_adding_files = self.file_adder_thread is not None and self.file_adder_thread[0].isRunning()
-        has_any_tasks = len(self.tasks) > 0
+        
+        has_any_tasks = self.model.rowCount() > 0
+
         has_tmdb_operations = bool(self.tmdb_lookup_workers) or bool(self.tmdb_queue)
         
         is_validating = any(v == 'validating' for v in self.validation_states.values())
@@ -5291,24 +5118,22 @@ class MainWindow(FramelessWidget):
         current_languages = self.selected_languages.copy()
         
         if len(selected_rows) == 1:
-            row = selected_rows[0]
-            if 0 <= row < len(self.tasks):
-                current_languages = self.tasks[row]["languages"].copy()
+            index = self.model.index(selected_rows[0], 0)
+            current_languages = index.data(LanguagesRole) or []
         elif len(selected_rows) > 1:
-            first_languages = None
+            first_index = self.model.index(selected_rows[0], 0)
+            first_languages = set(first_index.data(LanguagesRole) or [])
             all_same = True
             
-            for row in selected_rows:
-                if 0 <= row < len(self.tasks):
-                    task_languages = self.tasks[row]["languages"]
-                    if first_languages is None:
-                        first_languages = task_languages.copy()
-                    elif set(task_languages) != set(first_languages):
-                        all_same = False
-                        break
+            for row in selected_rows[1:]:
+                index = self.model.index(row, 0)
+                task_languages = set(index.data(LanguagesRole) or [])
+                if task_languages != first_languages:
+                    all_same = False
+                    break
             
-            if all_same and first_languages:
-                current_languages = first_languages
+            if all_same:
+                current_languages = list(first_languages)
         
         dialog = LanguageSelectionDialog(current_languages, self)
         dialog.set_title("Edit Output Languages")
@@ -5319,23 +5144,24 @@ class MainWindow(FramelessWidget):
                 return
             
             for row in selected_rows:
-                if 0 <= row < len(self.tasks):
-                    self.tasks[row]["languages"] = new_languages.copy()
-                    
-                    self.queue_manager.update_subtitle_languages(
-                        self.tasks[row]["path"], 
-                        new_languages, 
-                        self.tasks[row]["description"],
-                        self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
-                    )
+                index = self.model.index(row, 0)
+                self.model.setData(index, new_languages.copy(), LanguagesRole)
+                
+                self.queue_manager.update_subtitle_languages(
+                    index.data(PathRole), 
+                    new_languages, 
+                    index.data(DescriptionRole),
+                    self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
+                )
             
             self.tree_view.viewport().update()
                     
     def _set_queue_items_editable(self, is_editable):
         self.model.blockSignals(True)
-        for task in self.tasks:
-            if task.get("desc_item"):
-                task["desc_item"].setEditable(is_editable)
+        for row in range(self.model.rowCount()):
+            item = self.model.item(row, 2)
+            if item:
+                item.setEditable(is_editable)
         self.model.blockSignals(False)
     
     def _find_video_pair(self, subtitle_path):
@@ -5401,8 +5227,10 @@ class MainWindow(FramelessWidget):
             if queue_setting == "clear":
                 return True
             elif queue_setting == "clear_if_translated":
-                all_translated = all(self.queue_manager.get_language_progress_summary(task["path"]) == "Translated" 
-                          for task in self.tasks)
+                all_translated = all(
+                    self.queue_manager.get_language_progress_summary(self.model.index(row, 0).data(PathRole)) == "Translated" 
+                    for row in range(self.model.rowCount())
+                )
                 return all_translated
             elif queue_setting == "keep":
                 return False
@@ -5466,8 +5294,10 @@ class MainWindow(FramelessWidget):
                     self.queue_manager._save_queue_state()
                 
     def _cleanup_all_task_files(self):
-        for task in self.tasks:
-            task_path = task["path"]
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            task_path = index.data(PathRole)
+            languages = index.data(LanguagesRole)
             
             try:
                 original_basename = os.path.basename(task_path)
@@ -5489,7 +5319,7 @@ class MainWindow(FramelessWidget):
                 
                 pattern = self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.{modifiers}.srt")
                 
-                for lang_code in task["languages"]:
+                for lang_code in languages:
                     file_lang_code = lang_code
                     if file_lang_code.startswith('zh'):
                         file_lang_code = 'zh'
@@ -5555,14 +5385,14 @@ class MainWindow(FramelessWidget):
             return
         
         for row in selected_rows:
-            if 0 <= row < len(self.tasks):
-                task_path = self.tasks[row]["path"]
+            index = self.model.index(row, 0)
+            task_path = index.data(PathRole)
+            
+            if task_path in self.tmdb_lookup_workers:
+                continue
                 
-                if task_path in self.tmdb_lookup_workers:
-                    continue
-                    
-                if task_path not in self.tmdb_queue:
-                    self.tmdb_queue.append(task_path)
+            if task_path not in self.tmdb_queue:
+                self.tmdb_queue.append(task_path)
         
         self._process_tmdb_queue()
     
@@ -5572,16 +5402,17 @@ class MainWindow(FramelessWidget):
         if not api_key or not self.settings.get("use_tmdb", False):
             return
         
-        task = None
-        for t in self.tasks:
-            if t["path"] == file_path:
-                task = t
+        found = False
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            task_path = index.data(PathRole)
+            if task_path == file_path:
+                if not force and index.data(DescriptionRole):
+                    return
+                found = True
                 break
         
-        if not task:
-            return
-        
-        if not force and task["description"]:
+        if not found:
             return
         
         if file_path in self.tmdb_lookup_workers:
@@ -5635,19 +5466,19 @@ class MainWindow(FramelessWidget):
                 thread.wait()
             del self.tmdb_threads[file_path]
         
-        for task in self.tasks:
-            if task["path"] == file_path:
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            if index.data(PathRole) == file_path:
                 if success and description:
-                    task["description"] = description
-                    task["desc_item"].setText(description)
-                    task["desc_item"].setToolTip(description)
-                    task["description_source"] = "Auto"
+                    self.model.setData(index, description, DescriptionRole)
+                    self.model.setData(index, "Auto", DescriptionSourceRole)
+                    self.model.itemFromIndex(index.siblingAtColumn(2)).setText(description)
+                    self.model.itemFromIndex(index.siblingAtColumn(2)).setToolTip(description)
                     
                     movie_name = self._extract_movie_name_from_description(description)
                     if movie_name:
-                        task["movie_item"].setText(movie_name)
-                        task["movie_item"].setToolTip(movie_name)
-                        task["tmdb_title"] = movie_name
+                        self.model.itemFromIndex(index.siblingAtColumn(1)).setText(movie_name)
+                        self.model.itemFromIndex(index.siblingAtColumn(1)).setToolTip(movie_name)
                     
                     if file_path in self.queue_manager.state["queue_state"]:
                         self.queue_manager.state["queue_state"][file_path]["description"] = description
@@ -5655,17 +5486,18 @@ class MainWindow(FramelessWidget):
                         self.queue_manager.state["queue_state"][file_path]["tmdb_title"] = movie_name
                         self.queue_manager._save_queue_state()
                 
-                task["status_item"].setText("Queued")
+                self.model.itemFromIndex(index.siblingAtColumn(3)).setText("Queued")
                 break
         
         self._process_tmdb_queue()
-    
+
     def _on_tmdb_status_update(self, file_path, status):
-        for task in self.tasks:
-            if task["path"] == file_path:
-                task["status_item"].setText(status)
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            if index.data(PathRole) == file_path:
+                self.model.itemFromIndex(index.siblingAtColumn(3)).setText(status)
                 break
-    
+
     def _on_tmdb_finished(self, file_path, description, success):
         if file_path in self.tmdb_lookup_workers:
             del self.tmdb_lookup_workers[file_path]
@@ -5677,19 +5509,19 @@ class MainWindow(FramelessWidget):
                 thread.wait()
             del self.tmdb_threads[file_path]
         
-        for task in self.tasks:
-            if task["path"] == file_path:
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            if index.data(PathRole) == file_path:
                 if success and description:
-                    task["description"] = description
-                    task["desc_item"].setText(description)
-                    task["desc_item"].setToolTip(description)
-                    task["description_source"] = "Auto"
+                    self.model.setData(index, description, DescriptionRole)
+                    self.model.setData(index, "Auto", DescriptionSourceRole)
+                    self.model.itemFromIndex(index.siblingAtColumn(2)).setText(description)
+                    self.model.itemFromIndex(index.siblingAtColumn(2)).setToolTip(description)
                     
                     movie_name = self._extract_movie_name_from_description(description)
                     if movie_name:
-                        task["movie_item"].setText(movie_name)
-                        task["movie_item"].setToolTip(movie_name)
-                        task["tmdb_title"] = movie_name
+                        self.model.itemFromIndex(index.siblingAtColumn(1)).setText(movie_name)
+                        self.model.itemFromIndex(index.siblingAtColumn(1)).setToolTip(movie_name)
                     
                     if file_path in self.queue_manager.state["queue_state"]:
                         self.queue_manager.state["queue_state"][file_path]["description"] = description
@@ -5697,7 +5529,7 @@ class MainWindow(FramelessWidget):
                         self.queue_manager.state["queue_state"][file_path]["tmdb_title"] = movie_name
                         self.queue_manager._save_queue_state()
                 
-                task["status_item"].setText("Queued")
+                self.model.itemFromIndex(index.siblingAtColumn(3)).setText("Queued")
                 break
         
         self.update_button_states()
@@ -5723,18 +5555,17 @@ class MainWindow(FramelessWidget):
         return title_line
         
     def _update_task_to_video_subtitle(self, task_index, subtitle_path, video_path):
-        existing_task = self.tasks[task_index]
-        old_path = existing_task['path']
+        index = self.model.index(task_index, 0)
+        old_path = index.data(PathRole)
 
         self.queue_manager.transform_to_video_subtitle(old_path, subtitle_path, video_path)
 
-        existing_task['path'] = subtitle_path
-        existing_task['video_path'] = video_path
-        existing_task['task_type'] = "video+subtitle"
-
-        path_item = existing_task['path_item']
+        path_item = self.model.itemFromIndex(index)
         path_item.setText(os.path.basename(video_path))
         path_item.setToolTip(os.path.dirname(video_path))
+        path_item.setData(subtitle_path, PathRole)
+        path_item.setData(video_path, VideoPathRole)
+        path_item.setData("video+subtitle", TaskTypeRole)
 
         while path_item.rowCount() > 0:
             path_item.removeRow(0)
@@ -5745,8 +5576,6 @@ class MainWindow(FramelessWidget):
         path_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
 
         self.tree_view.viewport().update()
-
-    
 
 if __name__ == "__main__":
     if "--run-gst-subprocess" in sys.argv:
