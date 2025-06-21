@@ -4666,48 +4666,92 @@ class MainWindow(FramelessWidget):
         )
         if files:
             self._initiate_file_addition(files)
+            
+    def _get_subtitle_score(self, subtitle_path):
+        score = 0
+        parsed = _parse_subtitle_filename(os.path.basename(subtitle_path))
+
+        if parsed:
+            lang_code = parsed.get('lang_code')
+            if lang_code:
+                score += 4
+                if lang_code == 'en':
+                    score += 2
+            if not parsed.get('sdh'):
+                score += 2
+            if not parsed.get('forced'):
+                score += 1
+        
+        return score
 
     def _on_files_processed(self, prepared_tasks):
         newly_added_tasks = []
-        unmatched_new_tasks = []
         handled_new_tasks_indices = set()
 
         new_subtitles = [(i, task) for i, task in enumerate(prepared_tasks) if task['task_type'] == 'subtitle']
         new_videos = [(i, task) for i, task in enumerate(prepared_tasks) if task['task_type'] == 'video']
 
-        for task_idx in range(self.model.rowCount()):
-            index = self.model.index(task_idx, 0)
-            task_type = index.data(TaskTypeRole)
-            
-            if task_type == 'video':
-                for i, new_sub_task_info in new_subtitles:
-                    if i in handled_new_tasks_indices: continue
-                    if _files_are_pair(new_sub_task_info['primary_file'], index.data(PathRole)):
-                        self._update_task_to_video_subtitle(task_idx, new_sub_task_info['primary_file'], index.data(PathRole))
-                        handled_new_tasks_indices.add(i)
+        for i, new_sub_task in new_subtitles:
+            new_sub_path = new_sub_task['primary_file']
+            new_sub_parsed = _parse_subtitle_filename(os.path.basename(new_sub_path))
+            if not new_sub_parsed or not new_sub_parsed['base_name']:
+                continue
+
+            for task_idx in range(self.model.rowCount()):
+                index = self.model.index(task_idx, 0)
+                task_type = index.data(TaskTypeRole)
+                video_path = index.data(VideoPathRole)
+
+                if video_path:
+                    video_base_name = os.path.splitext(os.path.basename(video_path))[0]
+                    if new_sub_parsed['base_name'] == video_base_name:
+                    
+                        existing_sub_path = index.data(PathRole)
+                        
+                        new_score = self._get_subtitle_score(new_sub_path)
+                        existing_score = self._get_subtitle_score(existing_sub_path)
+
+                        if new_score > existing_score:
+                            old_entry_data = self.queue_manager.state["queue_state"].pop(existing_sub_path, {})
+                            if old_entry_data:
+                                old_entry_data['video_file'] = video_path
+                                self.queue_manager.state["queue_state"][new_sub_path] = old_entry_data
+                                self.queue_manager._save_queue_state()
+                            
+                            path_item = self.model.itemFromIndex(index)
+                            path_item.setData(new_sub_path, PathRole)
+                            
+                            if path_item.rowCount() > 0:
+                                child_item = path_item.child(0, 0)
+                                child_item.setText(f"{os.path.basename(new_sub_path)}")
+                                child_item.setToolTip(f"Subtitle: {new_sub_path}")
+                            
+                            handled_new_tasks_indices.add(i)
+                        else:
+                            handled_new_tasks_indices.add(i)
                         break
-            
-            elif task_type == 'subtitle':
-                for i, new_vid_task_info in new_videos:
-                    if i in handled_new_tasks_indices: continue
-                    if _files_are_pair(index.data(PathRole), new_vid_task_info['primary_file']):
-                        self._update_task_to_video_subtitle(task_idx, index.data(PathRole), new_vid_task_info['primary_file'])
+        
+        for i, new_vid_task in new_videos:
+            if i in handled_new_tasks_indices: continue
+            for task_idx in range(self.model.rowCount()):
+                index = self.model.index(task_idx, 0)
+                if index.data(TaskTypeRole) == 'subtitle':
+                    if _files_are_pair(index.data(PathRole), new_vid_task['primary_file']):
+                        self._update_task_to_video_subtitle(task_idx, index.data(PathRole), new_vid_task['primary_file'])
                         handled_new_tasks_indices.add(i)
                         break
 
         existing_paths = {self.model.index(row, 0).data(PathRole) for row in range(self.model.rowCount())}
-
+        tasks_to_finally_add = []
         for i, task_info in enumerate(prepared_tasks):
             if i in handled_new_tasks_indices:
                 continue
-            
             if task_info['primary_file'] in existing_paths:
                 continue
-            
-            unmatched_new_tasks.append(task_info)
+            tasks_to_finally_add.append(task_info)
         
-        if unmatched_new_tasks:
-            self._batch_add_tasks(unmatched_new_tasks)
+        if tasks_to_finally_add:
+            self._batch_add_tasks(tasks_to_finally_add)
 
     def _on_file_adder_finished(self):
         self.file_adder_thread = None
