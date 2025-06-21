@@ -843,6 +843,7 @@ class TMDBCacheManager:
     def __init__(self, cache_file_path):
         self.cache_file_path = cache_file_path
         self.cache = self._load_cache()
+        self._lock = threading.RLock()
         self._cleanup_expired_cache()
     
     def _load_cache(self):
@@ -856,97 +857,106 @@ class TMDBCacheManager:
         return {}
     
     def _save_cache(self):
-        try:
-            cache_dir = os.path.dirname(self.cache_file_path)
-            if not os.path.exists(cache_dir):
-                os.makedirs(cache_dir, exist_ok=True)
-            
-            with open(self.cache_file_path, 'w', encoding='utf-8') as f:
-                json.dump(self.cache, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Error saving TMDB cache: {e}")
+        with self._lock:
+            try:
+                cache_dir = os.path.dirname(self.cache_file_path)
+                if not os.path.exists(cache_dir):
+                    os.makedirs(cache_dir, exist_ok=True)
+                
+                cache_copy = dict(self.cache)
+                
+                with open(self.cache_file_path, 'w', encoding='utf-8') as f:
+                    json.dump(cache_copy, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"Error saving TMDB cache: {e}")
     
     def _cleanup_expired_cache(self):
-        cutoff = datetime.datetime.now() - timedelta(days=365)
-        expired_shows = []
-        
-        for show_key, show_data in self.cache.items():
-            last_used_str = show_data.get("last_used", "")
-            if last_used_str:
-                try:
-                    last_used = datetime.datetime.fromisoformat(last_used_str.replace('Z', ''))
-                    if last_used < cutoff:
+        with self._lock:
+            cutoff = datetime.datetime.now() - timedelta(days=365)
+            expired_shows = []
+            
+            for show_key, show_data in self.cache.items():
+                last_used_str = show_data.get("last_used", "")
+                if last_used_str:
+                    try:
+                        last_used = datetime.datetime.fromisoformat(last_used_str.replace('Z', ''))
+                        if last_used < cutoff:
+                            expired_shows.append(show_key)
+                    except ValueError:
                         expired_shows.append(show_key)
-                except ValueError:
+                else:
                     expired_shows.append(show_key)
-            else:
-                expired_shows.append(show_key)
-        
-        for show_key in expired_shows:
-            del self.cache[show_key]
-        
-        if expired_shows:
-            self._save_cache()
+            
+            for show_key in expired_shows:
+                del self.cache[show_key]
+            
+            if expired_shows:
+                self._save_cache()
     
     def get_cached_show(self, show_title):
-        show_key = show_title.lower().replace(' ', '_')
-        if show_key in self.cache:
-            show_data = self.cache[show_key]
-            show_data["last_used"] = datetime.datetime.now().isoformat()
-            self._save_cache()
-            return show_data
-        
-        return None
-    
-    def cache_show(self, show_title, tmdb_id, title, show_data):
-        show_key = show_title.lower().replace(' ', '_')
-        if show_key not in self.cache:
-            self.cache[show_key] = {
-                "tmdb_id": tmdb_id,
-                "title": title,
-                "data": show_data,
-                "episodes": {},
-                "last_used": datetime.datetime.now().isoformat()
-            }
-        else:
-            self.cache[show_key]["last_used"] = datetime.datetime.now().isoformat()
-        
-        self._save_cache()
-    
-    def get_cached_episode(self, show_title, season, episode):
-        show_key = show_title.lower().replace(' ', '_')
-        episode_key = f"s{season:02d}e{episode:02d}"
-        
-        if show_key in self.cache:
-            show_data = self.cache[show_key]
-            episodes = show_data.get("episodes", {})
-            
-            if episode_key in episodes:
+        with self._lock:
+            show_key = show_title.lower().replace(' ', '_')
+            if show_key in self.cache:
+                show_data = self.cache[show_key]
                 show_data["last_used"] = datetime.datetime.now().isoformat()
                 self._save_cache()
-                return episodes[episode_key]
-        
-        return None
+                return show_data
+            
+            return None
     
-    def cache_episode(self, show_title, season, episode, episode_data):
-        show_key = show_title.lower().replace(' ', '_')
-        episode_key = f"s{season:02d}e{episode:02d}"
-        
-        if show_key in self.cache:
-            if "episodes" not in self.cache[show_key]:
-                self.cache[show_key]["episodes"] = {}
+    def cache_show(self, show_title, tmdb_id, title, show_data):
+        with self._lock:
+            show_key = show_title.lower().replace(' ', '_')
+            if show_key not in self.cache:
+                self.cache[show_key] = {
+                    "tmdb_id": tmdb_id,
+                    "title": title,
+                    "data": show_data,
+                    "episodes": {},
+                    "last_used": datetime.datetime.now().isoformat()
+                }
+            else:
+                self.cache[show_key]["last_used"] = datetime.datetime.now().isoformat()
             
-            self.cache[show_key]["episodes"][episode_key] = {
-                "data": episode_data,
-                "cached_at": datetime.datetime.now().isoformat()
-            }
-            
-            self.cache[show_key]["last_used"] = datetime.datetime.now().isoformat()
             self._save_cache()
     
+    def get_cached_episode(self, show_title, season, episode):
+        with self._lock:
+            show_key = show_title.lower().replace(' ', '_')
+            episode_key = f"s{season:02d}e{episode:02d}"
+            
+            if show_key in self.cache:
+                show_data = self.cache[show_key]
+                episodes = show_data.get("episodes", {})
+                
+                if episode_key in episodes:
+                    show_data["last_used"] = datetime.datetime.now().isoformat()
+                    self._save_cache()
+                    return episodes[episode_key]
+            
+            return None
+    
+    def cache_episode(self, show_title, season, episode, episode_data):
+        with self._lock:
+            show_key = show_title.lower().replace(' ', '_')
+            episode_key = f"s{season:02d}e{episode:02d}"
+            
+            if show_key in self.cache:
+                if "episodes" not in self.cache[show_key]:
+                    self.cache[show_key]["episodes"] = {}
+                
+                self.cache[show_key]["episodes"][episode_key] = {
+                    "data": episode_data,
+                    "cached_at": datetime.datetime.now().isoformat()
+                }
+                
+                self.cache[show_key]["last_used"] = datetime.datetime.now().isoformat()
+                self._save_cache()
+    
     def clear_cache(self):
-        self.cache = {}
-        self._save_cache()
+        with self._lock:
+            self.cache = {}
+            self._save_cache()
 
 class QueueStateManager:
     def __init__(self, queue_file_path):
