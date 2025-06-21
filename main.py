@@ -1478,6 +1478,13 @@ class QueueStateManager:
             self._save_queue_state()
             return True
         return False
+        
+    def update_description(self, subtitle_path, new_description, source="Manual"):
+        if subtitle_path in self.state["queue_state"]:
+            entry = self.state["queue_state"][subtitle_path]
+            entry["description"] = new_description
+            entry["description_source"] = source
+            self._save_queue_state()
 
 class DialogTitleBarWidget(QWidget):
     def __init__(self, title="Dialog", parent=None):
@@ -3856,7 +3863,6 @@ class MainWindow(FramelessWidget):
         
         self.model = CustomTaskModel(self)
         self.model.setHorizontalHeaderLabels(["Files", "Title", "Description", "Status"])
-        self.model.itemChanged.connect(self.on_item_changed)
         
         self.custom_delegate = CustomTaskDelegate()
         self.tree_view.setItemDelegate(self.custom_delegate)
@@ -4114,6 +4120,7 @@ class MainWindow(FramelessWidget):
 
             target_languages = subtitle_data.get("target_languages", [])
             description = subtitle_data.get("description", "")
+            description_source = subtitle_data.get("description_source", "Manual")
             tmdb_title = subtitle_data.get("tmdb_title", "")
             task_type = subtitle_data.get("task_type", "subtitle")
             video_file = subtitle_data.get("video_file")
@@ -4126,12 +4133,11 @@ class MainWindow(FramelessWidget):
                     subtitle_data["requires_audio_extraction"] = False
                     self.queue_manager._save_queue_state()
 
-            model_row = self._prepare_model_row(subtitle_path, target_languages, description, task_type)
+            model_row = self._prepare_model_row(subtitle_path, target_languages, description, task_type, description_source)
             
             if tmdb_title:
                 model_row[1].setText(tmdb_title)
                 model_row[1].setToolTip(tmdb_title)
-                model_row[2].setData("Auto", DescriptionSourceRole)
             
             summary = self.queue_manager.get_language_progress_summary(subtitle_path)
             model_row[3].setText(summary)
@@ -4177,12 +4183,18 @@ class MainWindow(FramelessWidget):
             
             self.active_worker.force_cancel()
 
-    def on_item_changed(self, item):
-        if item.column() == 2:
-            index = item.index()
-            self.model.setData(index, item.text(), DescriptionRole)
-            self.model.setData(index, "Manual", DescriptionSourceRole)
-            item.setToolTip(item.text())
+    def _update_task_description(self, row, new_description):
+        index = self.model.index(row, 0)
+        task_path = index.data(PathRole)
+        if not task_path:
+            return
+
+        desc_index = index.siblingAtColumn(2)
+        self.model.setData(desc_index, new_description)
+        self.model.setData(index, new_description, DescriptionRole)
+        self.model.setData(index, "Manual", DescriptionSourceRole)
+
+        self.queue_manager.update_description(task_path, new_description, "Manual")
 
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.Copy):
@@ -4333,33 +4345,20 @@ class MainWindow(FramelessWidget):
             index = self.model.index(selected_rows[0], 0)
             self.clipboard_description = index.data(DescriptionRole)
 
-    def apply_copied_description(self):
-        if not self.clipboard_description:
-            return
-        
-        selected_rows = self._get_selected_task_rows()
-        for row in selected_rows:
-            desc_index = self.model.index(row, 2)
-            self.model.setData(desc_index, self.clipboard_description)
-            self.model.setData(desc_index.siblingAtColumn(0), self.clipboard_description, DescriptionRole)
-            self.model.setData(desc_index.siblingAtColumn(0), "Manual", DescriptionSourceRole)
-
     def edit_single_description(self):
         selected_rows = self._get_selected_task_rows()
         if len(selected_rows) != 1:
             return
         
-        index = self.model.index(selected_rows[0], 0)
+        row = selected_rows[0]
+        index = self.model.index(row, 0)
         current_desc = index.data(DescriptionRole)
         
         dialog = BulkDescriptionDialog(current_desc, self)
         dialog.setWindowTitle("Edit Description")
         if dialog.exec():
             new_description = dialog.get_description()
-            desc_index = self.model.index(selected_rows[0], 2)
-            self.model.setData(desc_index, new_description)
-            self.model.setData(desc_index.siblingAtColumn(0), new_description, DescriptionRole)
-            self.model.setData(desc_index.siblingAtColumn(0), "Manual", DescriptionSourceRole)
+            self._update_task_description(row, new_description)
 
     def bulk_edit_description(self):
         selected_rows = self._get_selected_task_rows()
@@ -4370,10 +4369,15 @@ class MainWindow(FramelessWidget):
         if dialog.exec():
             new_description = dialog.get_description()
             for row in selected_rows:
-                desc_index = self.model.index(row, 2)
-                self.model.setData(desc_index, new_description)
-                self.model.setData(desc_index.siblingAtColumn(0), new_description, DescriptionRole)
-                self.model.setData(desc_index.siblingAtColumn(0), "Manual", DescriptionSourceRole)
+                self._update_task_description(row, new_description)
+
+    def apply_copied_description(self):
+        if not self.clipboard_description:
+            return
+        
+        selected_rows = self._get_selected_task_rows()
+        for row in selected_rows:
+            self._update_task_description(row, self.clipboard_description)
 
     def move_selected_to_top(self):
         if self.active_thread and self.active_thread.isRunning():
@@ -4802,7 +4806,7 @@ class MainWindow(FramelessWidget):
         
         self._process_tmdb_queue()
     
-    def _prepare_model_row(self, file_path, languages, description, task_type="subtitle"):
+    def _prepare_model_row(self, file_path, languages, description, task_type="subtitle", description_source="Manual"):
         video_path = None
         subtitle_path_for_data = file_path
 
@@ -4824,13 +4828,13 @@ class MainWindow(FramelessWidget):
         path_item.setData(description, DescriptionRole)
         path_item.setData(languages, LanguagesRole)
         path_item.setData(task_type, TaskTypeRole)
-        path_item.setData("Manual", DescriptionSourceRole)
+        path_item.setData(description_source, DescriptionSourceRole)
         
         movie_item = QStandardItem("")
         movie_item.setEditable(False)
         
         desc_item = QStandardItem(description)
-        desc_item.setEditable(True)
+        desc_item.setEditable(False)
         desc_item.setToolTip(description)
         
         status_item = QStandardItem("Queued")
@@ -4914,7 +4918,6 @@ class MainWindow(FramelessWidget):
         self.stop_after_current_task = False
         self.update_button_states()
         self.current_task_index = -1
-        self._set_queue_items_editable(True)
 
     @Slot(int, str)
     def on_worker_status_message(self, task_idx, message):
@@ -4982,7 +4985,6 @@ class MainWindow(FramelessWidget):
         elif not self.is_running:
             CustomMessageBox.information(self, "Stop", "No active translation to stop.")
             self.update_button_states()
-            self._set_queue_items_editable(True)
     
     @Slot()
     def clear_queue_action(self):
@@ -5214,14 +5216,6 @@ class MainWindow(FramelessWidget):
                 )
             
             self.tree_view.viewport().update()
-                    
-    def _set_queue_items_editable(self, is_editable):
-        self.model.blockSignals(True)
-        for row in range(self.model.rowCount()):
-            item = self.model.item(row, 2)
-            if item:
-                item.setEditable(is_editable)
-        self.model.blockSignals(False)
     
     def _find_video_pair(self, subtitle_path):
         subtitle_info = _parse_subtitle_filename(os.path.basename(subtitle_path))
@@ -5529,9 +5523,11 @@ class MainWindow(FramelessWidget):
                         self.model.itemFromIndex(index.siblingAtColumn(1)).setToolTip(movie_name)
                     
                     if task_id in self.queue_manager.state["queue_state"]:
-                        self.queue_manager.state["queue_state"][task_id]["description"] = description
-                        self.queue_manager.state["queue_state"][task_id]["tmdb_info"] = description
-                        self.queue_manager.state["queue_state"][task_id]["tmdb_title"] = movie_name
+                        queue_entry = self.queue_manager.state["queue_state"][task_id]
+                        queue_entry["description"] = description
+                        queue_entry["tmdb_info"] = description
+                        queue_entry["tmdb_title"] = movie_name
+                        queue_entry["description_source"] = "Auto"
                         self.queue_manager._save_queue_state()
                 
                 self.model.itemFromIndex(index.siblingAtColumn(3)).setText("Queued")
