@@ -2373,7 +2373,16 @@ class CustomTaskDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.row_height = 25
-    
+        
+        base_font = QApplication.font()
+        self.primary_font = QFont(base_font)
+
+        self.secondary_font = QFont(base_font)
+        self.secondary_font.setPointSize(max(6, int(base_font.pointSize() * 0.8)))
+        
+        self.indicator_font = QFont(base_font)
+        self.indicator_font.setPointSize(max(6, int(base_font.pointSize() * 0.7)))
+
     def sizeHint(self, option, index):
         size = super().sizeHint(option, index)
         if not index.parent().isValid():
@@ -2390,13 +2399,6 @@ class CustomTaskDelegate(QStyledItemDelegate):
         
         painter.save()
         
-        primary_font = option.font
-        secondary_font = QFont(option.font)
-        secondary_font.setPointSize(max(6, int(option.font.pointSize() * 0.8)))
-        
-        indicator_font = QFont(option.font)
-        indicator_font.setPointSize(max(6, int(option.font.pointSize() * 0.7)))
-        
         if index.column() == 2:
             full_text = str(index.data()) if index.data() else ""
             primary_text = full_text.split('\n')[0] if full_text else ""
@@ -2409,11 +2411,11 @@ class CustomTaskDelegate(QStyledItemDelegate):
             
             indicator_width = 0
             if indicator_text:
-                painter.setFont(indicator_font)
+                painter.setFont(self.indicator_font)
                 indicator_metrics = painter.fontMetrics()
                 indicator_width = indicator_metrics.horizontalAdvance(indicator_text) + 8
             
-            painter.setFont(primary_font)
+            painter.setFont(self.primary_font)
             text_metrics = painter.fontMetrics()
             
             text_width_available = available_width - indicator_width
@@ -2441,7 +2443,7 @@ class CustomTaskDelegate(QStyledItemDelegate):
             if show_indicator and indicator_text:
                 indicator_rect = QRect(option.rect.right() - indicator_width, option.rect.top(),
                                      indicator_width - 4, option.rect.height())
-                painter.setFont(indicator_font)
+                painter.setFont(self.indicator_font)
                 painter.drawText(indicator_rect, Qt.AlignRight | Qt.AlignVCenter, indicator_text)
         
         elif index.column() == 0:
@@ -2456,11 +2458,11 @@ class CustomTaskDelegate(QStyledItemDelegate):
             secondary_rect = QRect(option.rect.left() + 4, option.rect.top() + option.rect.height() // 2, 
                                  option.rect.width() - 8, option.rect.height() // 2)
             
-            painter.setFont(primary_font)
+            painter.setFont(self.primary_font)
             painter.drawText(primary_rect, Qt.AlignLeft | Qt.AlignVCenter, primary_text)
             
             if secondary_text:
-                painter.setFont(secondary_font)
+                painter.setFont(self.secondary_font)
                 painter.drawText(secondary_rect, Qt.AlignLeft | Qt.AlignVCenter, secondary_text)
         
         else:
@@ -2468,7 +2470,7 @@ class CustomTaskDelegate(QStyledItemDelegate):
             primary_rect = QRect(option.rect.left() + 4, option.rect.top(), 
                                option.rect.width() - 8, option.rect.height())
             
-            painter.setFont(primary_font)
+            painter.setFont(self.primary_font)
             painter.drawText(primary_rect, Qt.AlignLeft | Qt.AlignVCenter, primary_text)
         
         painter.restore()
