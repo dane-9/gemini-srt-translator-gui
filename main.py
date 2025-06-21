@@ -3906,15 +3906,13 @@ class MainWindow(FramelessWidget):
         new_tasks = []
         for row in range(self.model.rowCount()):
             path_item = self.model.item(row, 0)
-            lang_item = self.model.item(row, 1)
-            type_item = self.model.item(row, 2)
-            desc_item = self.model.item(row, 3)
-            status_item = self.model.item(row, 4)
+            movie_item = self.model.item(row, 1)
+            desc_item = self.model.item(row, 2)
+            status_item = self.model.item(row, 3)
             
             for task in self.tasks:
                 if (task["path_item"] is path_item and 
-                    task["lang_item"] is lang_item and 
-                    task["type_item"] is type_item and
+                    task["movie_item"] is movie_item and
                     task["desc_item"] is desc_item and
                     task["status_item"] is status_item):
                     new_tasks.append(task)
@@ -3936,10 +3934,17 @@ class MainWindow(FramelessWidget):
         self.tree_view.setSortingEnabled(False)
         
         self.model.clear()
-        self.model.setHorizontalHeaderLabels(["File Name", "Output Languages", "Type", "Description", "Status"])
+        self.model.setHorizontalHeaderLabels(["Files", "Title", "Description", "Status"])
         
         for task in self.tasks:
-            self.model.appendRow([task["path_item"], task["lang_item"], task["type_item"], task["desc_item"], task["status_item"]])
+            self.model.appendRow([task["path_item"], task["movie_item"], task["desc_item"], task["status_item"]])
+            
+            if task.get("task_type") == "video+subtitle" and task["path_item"].rowCount() == 0:
+                subtitle_path = task["path"]
+                subtitle_child = QStandardItem(f"{os.path.basename(subtitle_path)}")
+                subtitle_child.setToolTip(f"Subtitle: {subtitle_path}")
+                subtitle_child.setEditable(False)
+                task["path_item"].appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
         
         for i, width in enumerate(col_widths):
             if i < self.model.columnCount():
@@ -3969,13 +3974,9 @@ class MainWindow(FramelessWidget):
             if (old_languages != self.selected_languages and 
                 self.settings.get("update_existing_queue_languages", True)):
                 
-                new_lang_display = self._get_language_display_text(self.selected_languages)
-                new_lang_tooltip = self._format_language_tooltip(self.selected_languages)
-                
                 for task in self.tasks:
                     if task["languages"] == old_languages:
-                        task["lang_item"].setText(new_lang_display)
-                        task["lang_item"].setToolTip(new_lang_tooltip)
+                        # Fix: Just update the task data - display is handled by the delegate
                         task["languages"] = self.selected_languages.copy()
                         
                         self.queue_manager.update_subtitle_languages(
@@ -3984,6 +3985,8 @@ class MainWindow(FramelessWidget):
                             task["description"],
                             self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
                         )
+                
+                self.tree_view.viewport().update()
             
             self._save_settings()
     
@@ -4588,9 +4591,9 @@ class MainWindow(FramelessWidget):
                 subtitle_path = file_path
                 video_path = self._find_video_pair(file_path)
             
-            video_item = QStandardItem(os.path.basename(video_path))
-            video_item.setToolTip(os.path.dirname(video_path))
-            video_item.setEditable(False)
+            path_item = QStandardItem(os.path.basename(video_path))
+            path_item.setToolTip(os.path.dirname(video_path))
+            path_item.setEditable(False)
             
             movie_item = QStandardItem("")
             movie_item.setEditable(False)
@@ -4606,12 +4609,12 @@ class MainWindow(FramelessWidget):
             subtitle_child.setToolTip(f"Subtitle: {subtitle_path}")
             subtitle_child.setEditable(False)
             
-            video_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
+            path_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
             
             task_data = {
                 "path": subtitle_path,
                 "video_path": video_path,
-                "path_item": video_item, 
+                "path_item": path_item, 
                 "movie_item": movie_item,
                 "desc_item": desc_item, 
                 "status_item": status_item, 
@@ -4623,7 +4626,7 @@ class MainWindow(FramelessWidget):
                 "thread": None
             }
             
-            model_row = [video_item, movie_item, desc_item, status_item]
+            model_row = [path_item, movie_item, desc_item, status_item]
             
         else:
             path_item = QStandardItem(os.path.basename(file_path))
@@ -4968,14 +4971,9 @@ class MainWindow(FramelessWidget):
             if not new_languages:
                 return
             
-            new_lang_display = self._get_language_display_text(new_languages)
-            new_lang_tooltip = self._format_language_tooltip(new_languages)
-            
             for row in selected_rows:
                 if 0 <= row < len(self.tasks):
                     self.tasks[row]["languages"] = new_languages.copy()
-                    self.tasks[row]["lang_item"].setText(new_lang_display)
-                    self.tasks[row]["lang_item"].setToolTip(new_lang_tooltip)
                     
                     self.queue_manager.update_subtitle_languages(
                         self.tasks[row]["path"], 
@@ -4983,6 +4981,8 @@ class MainWindow(FramelessWidget):
                         self.tasks[row]["description"],
                         self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt")
                     )
+            
+            self.tree_view.viewport().update()
                     
     def _set_queue_items_editable(self, is_editable):
         self.model.blockSignals(True)
