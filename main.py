@@ -9,7 +9,8 @@ import argparse
 import queue
 import threading
 import requests
-
+import datetime
+from datetime import timedelta
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTreeView, QLineEdit, QLabel, QFileDialog, QMessageBox,
@@ -746,20 +747,40 @@ class TMDBLookupWorker(QObject):
         return self._apply_template(self.movie_template, movie_data)
     
     def _lookup_episode(self, show_title, season, episode):
-        search_result = self._make_request('search/tv', {'query': show_title})
-        if not search_result or not search_result.get('results'):
-            return ""
+        cached_episode = self.tmdb_cache.get_cached_episode(show_title, season, episode) if hasattr(self, 'tmdb_cache') else None
         
-        tv_id = search_result['results'][0]['id']
-        tv_details = self._make_request(f'tv/{tv_id}')
-        
-        if not tv_details:
-            return ""
-        
-        episode_details = self._make_request(f'tv/{tv_id}/season/{season}/episode/{episode}')
-        
-        if not episode_details:
-            return ""
+        if cached_episode:
+            episode_details = cached_episode["data"]
+            
+            cached_show = self.tmdb_cache.get_cached_show(show_title)
+            tv_details = cached_show["data"] if cached_show else {}
+        else:
+            cached_show = self.tmdb_cache.get_cached_show(show_title) if hasattr(self, 'tmdb_cache') else None
+            
+            if cached_show:
+                tv_id = cached_show["tmdb_id"]
+                tv_details = cached_show["data"]
+            else:
+                search_result = self._make_request('search/tv', {'query': show_title})
+                if not search_result or not search_result.get('results'):
+                    return ""
+                
+                tv_id = search_result['results'][0]['id']
+                tv_details = self._make_request(f'tv/{tv_id}')
+                
+                if not tv_details:
+                    return ""
+                
+                if hasattr(self, 'tmdb_cache'):
+                    self.tmdb_cache.cache_show(show_title, tv_id, tv_details.get('name', ''), tv_details)
+            
+            episode_details = self._make_request(f'tv/{tv_id}/season/{season}/episode/{episode}')
+            
+            if not episode_details:
+                return ""
+            
+            if hasattr(self, 'tmdb_cache'):
+                self.tmdb_cache.cache_episode(show_title, season, episode, episode_details)
         
         episode_data = {
             'show.title': tv_details.get('name', ''),
@@ -817,6 +838,115 @@ def _validate_tmdb_api_key(api_key):
         return response.status_code == 200
     except:
         return False
+        
+class TMDBCacheManager:
+    def __init__(self, cache_file_path):
+        self.cache_file_path = cache_file_path
+        self.cache = self._load_cache()
+        self._cleanup_expired_cache()
+    
+    def _load_cache(self):
+        try:
+            if os.path.exists(self.cache_file_path):
+                with open(self.cache_file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Error loading TMDB cache: {e}")
+        
+        return {}
+    
+    def _save_cache(self):
+        try:
+            cache_dir = os.path.dirname(self.cache_file_path)
+            if not os.path.exists(cache_dir):
+                os.makedirs(cache_dir, exist_ok=True)
+            
+            with open(self.cache_file_path, 'w', encoding='utf-8') as f:
+                json.dump(self.cache, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving TMDB cache: {e}")
+    
+    def _cleanup_expired_cache(self):
+        cutoff = datetime.datetime.now() - timedelta(days=365)
+        expired_shows = []
+        
+        for show_key, show_data in self.cache.items():
+            last_used_str = show_data.get("last_used", "")
+            if last_used_str:
+                try:
+                    last_used = datetime.datetime.fromisoformat(last_used_str.replace('Z', ''))
+                    if last_used < cutoff:
+                        expired_shows.append(show_key)
+                except ValueError:
+                    expired_shows.append(show_key)
+            else:
+                expired_shows.append(show_key)
+        
+        for show_key in expired_shows:
+            del self.cache[show_key]
+        
+        if expired_shows:
+            self._save_cache()
+    
+    def get_cached_show(self, show_title):
+        show_key = show_title.lower().replace(' ', '_')
+        if show_key in self.cache:
+            show_data = self.cache[show_key]
+            show_data["last_used"] = datetime.datetime.now().isoformat()
+            self._save_cache()
+            return show_data
+        
+        return None
+    
+    def cache_show(self, show_title, tmdb_id, title, show_data):
+        show_key = show_title.lower().replace(' ', '_')
+        if show_key not in self.cache:
+            self.cache[show_key] = {
+                "tmdb_id": tmdb_id,
+                "title": title,
+                "data": show_data,
+                "episodes": {},
+                "last_used": datetime.datetime.now().isoformat()
+            }
+        else:
+            self.cache[show_key]["last_used"] = datetime.datetime.now().isoformat()
+        
+        self._save_cache()
+    
+    def get_cached_episode(self, show_title, season, episode):
+        show_key = show_title.lower().replace(' ', '_')
+        episode_key = f"s{season:02d}e{episode:02d}"
+        
+        if show_key in self.cache:
+            show_data = self.cache[show_key]
+            episodes = show_data.get("episodes", {})
+            
+            if episode_key in episodes:
+                show_data["last_used"] = datetime.datetime.now().isoformat()
+                self._save_cache()
+                return episodes[episode_key]
+        
+        return None
+    
+    def cache_episode(self, show_title, season, episode, episode_data):
+        show_key = show_title.lower().replace(' ', '_')
+        episode_key = f"s{season:02d}e{episode:02d}"
+        
+        if show_key in self.cache:
+            if "episodes" not in self.cache[show_key]:
+                self.cache[show_key]["episodes"] = {}
+            
+            self.cache[show_key]["episodes"][episode_key] = {
+                "data": episode_data,
+                "cached_at": datetime.datetime.now().isoformat()
+            }
+            
+            self.cache[show_key]["last_used"] = datetime.datetime.now().isoformat()
+            self._save_cache()
+    
+    def clear_cache(self):
+        self.cache = {}
+        self._save_cache()
 
 class QueueStateManager:
     def __init__(self, queue_file_path):
@@ -1799,10 +1929,20 @@ class SettingsDialog(CustomFramelessDialog):
         layout = QVBoxLayout(page)
         layout.setSpacing(15)
         
+        tmdb_header_layout = QHBoxLayout()
+        
         self.tmdb_checkbox = QCheckBox("Use TMDB for automatic descriptions")
         self.tmdb_checkbox.setChecked(self.settings.get("use_tmdb", False))
         self.tmdb_checkbox.stateChanged.connect(self.toggle_tmdb_settings)
-        layout.addWidget(self.tmdb_checkbox)
+        tmdb_header_layout.addWidget(self.tmdb_checkbox)
+        
+        tmdb_header_layout.addStretch()
+        
+        self.clear_cache_btn = QPushButton("Clear TMDB Cache")
+        self.clear_cache_btn.clicked.connect(self.clear_tmdb_cache)
+        tmdb_header_layout.addWidget(self.clear_cache_btn)
+        
+        layout.addLayout(tmdb_header_layout)
         
         self.tmdb_content_widget = QWidget()
         tmdb_layout = QVBoxLayout(self.tmdb_content_widget)
@@ -1900,6 +2040,15 @@ class SettingsDialog(CustomFramelessDialog):
             self.tmdb_content_widget.setStyleSheet("color: grey;")
         else:
             self.tmdb_content_widget.setStyleSheet("")
+            
+    def clear_tmdb_cache(self):
+        if hasattr(self.parent(), 'tmdb_cache'):
+            reply = CustomMessageBox.question(self, "Clear TMDB Cache", 
+                                            "Clear all cached TMDB show data?\n\nThis will require re-downloading show information.",
+                                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.parent().tmdb_cache.clear_cache()
+                CustomMessageBox.information(self, "Cache Cleared", "TMDB cache has been cleared.")
             
     def edit_movie_template(self):
         current_template = self.settings.get("tmdb_movie_template", "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}")
@@ -3459,7 +3608,7 @@ class MainWindow(FramelessWidget):
         content_layout.setContentsMargins(6, 6, 6, 6)
         
         config_layout = QFormLayout()
-
+    
         api_keys_model_layout = QHBoxLayout()
         
         self.api_key_edit = CustomLineEdit()
@@ -3590,6 +3739,9 @@ class MainWindow(FramelessWidget):
         queue_state_file = get_persistent_path(os.path.join("Files", "queue_state.json"))
         self.queue_manager = QueueStateManager(queue_state_file)
         
+        tmdb_cache_file = get_persistent_path(os.path.join("Files", "tmdb_cache.json"))
+        self.tmdb_cache = TMDBCacheManager(tmdb_cache_file)
+        
         self._sync_ui_with_queue_state()
         
         self.update_button_states()
@@ -3603,6 +3755,7 @@ class MainWindow(FramelessWidget):
                 
             target_languages = subtitle_data.get("target_languages", [])
             description = subtitle_data.get("description", "")
+            tmdb_title = subtitle_data.get("tmdb_title", "")
             task_type = subtitle_data.get("task_type", "subtitle")
             video_file = subtitle_data.get("video_file")
             
@@ -3623,6 +3776,12 @@ class MainWindow(FramelessWidget):
                     if task['path'] == subtitle_path:
                         summary = self.queue_manager.get_language_progress_summary(subtitle_path)
                         task["status_item"].setText(summary)
+                        
+                        if tmdb_title:
+                            task["movie_item"].setText(tmdb_title)
+                            task["movie_item"].setToolTip(tmdb_title)
+                            task["tmdb_title"] = tmdb_title
+                            task["description_source"] = "Auto"
                         break
     
     def _add_task_to_ui(self, file_path, languages, description, task_type="subtitle"):
@@ -5082,6 +5241,7 @@ class MainWindow(FramelessWidget):
         episode_template = self.settings.get("tmdb_episode_template", "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}")
         
         worker = TMDBLookupWorker(file_path, api_key, movie_template, episode_template)
+        worker.tmdb_cache = self.tmdb_cache
         thread = QThread(self)
         
         worker.moveToThread(thread)
@@ -5126,10 +5286,12 @@ class MainWindow(FramelessWidget):
                     if movie_name:
                         task["movie_item"].setText(movie_name)
                         task["movie_item"].setToolTip(movie_name)
+                        task["tmdb_title"] = movie_name
                     
                     if file_path in self.queue_manager.state["queue_state"]:
                         self.queue_manager.state["queue_state"][file_path]["description"] = description
                         self.queue_manager.state["queue_state"][file_path]["tmdb_info"] = description
+                        self.queue_manager.state["queue_state"][file_path]["tmdb_title"] = movie_name
                         self.queue_manager._save_queue_state()
                 
                 task["status_item"].setText("Queued")
