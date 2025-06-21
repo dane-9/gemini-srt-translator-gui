@@ -3759,6 +3759,8 @@ class MainWindow(FramelessWidget):
     def _sync_ui_with_queue_state(self):
         queue_state = self.queue_manager.state.get("queue_state", {})
         
+        tasks_to_restore = []
+        
         for subtitle_path, subtitle_data in queue_state.items():
             if not os.path.exists(subtitle_path):
                 continue
@@ -3780,97 +3782,34 @@ class MainWindow(FramelessWidget):
             task_exists = any(task['path'] == subtitle_path and task['languages'] == target_languages for task in self.tasks)
             
             if not task_exists:
-                self._add_task_to_ui(subtitle_path, target_languages, description, task_type)
-                
-                for task in self.tasks:
-                    if task['path'] == subtitle_path:
-                        summary = self.queue_manager.get_language_progress_summary(subtitle_path)
-                        task["status_item"].setText(summary)
-                        
-                        if tmdb_title:
-                            task["movie_item"].setText(tmdb_title)
-                            task["movie_item"].setToolTip(tmdb_title)
-                            task["tmdb_title"] = tmdb_title
-                            task["description_source"] = "Auto"
-                        break
-    
-    def _add_task_to_ui(self, file_path, languages, description, task_type="subtitle"):
-        lang_display = self._get_language_display_text(languages)
+                tasks_to_restore.append({
+                    'path': subtitle_path,
+                    'languages': target_languages,
+                    'description': description,
+                    'task_type': task_type,
+                    'tmdb_title': tmdb_title
+                })
         
-        if task_type == "video+subtitle":
-            if is_video_file(file_path):
-                video_path = file_path
-                subtitle_path = self._find_subtitle_pair(file_path)
-            else:
-                subtitle_path = file_path
-                video_path = self._find_video_pair(file_path)
-            
-            video_item = QStandardItem(os.path.basename(video_path))
-            video_item.setToolTip(os.path.dirname(video_path))
-            video_item.setEditable(False)
-            
-            movie_item = QStandardItem("")
-            movie_item.setEditable(False)
-            
-            desc_item = QStandardItem(description)
-            desc_item.setEditable(True)
-            desc_item.setToolTip(description)
-            
-            status_item = QStandardItem("Queued")
-            status_item.setEditable(False)
-            
-            subtitle_child = QStandardItem(f"{os.path.basename(subtitle_path)}")
-            subtitle_child.setToolTip(f"Subtitle: {subtitle_path}")
-            subtitle_child.setEditable(False)
-            
-            video_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
-            
-            self.model.appendRow([video_item, movie_item, desc_item, status_item])
-            
-            self.tasks.append({
-                "path": subtitle_path,
-                "video_path": video_path,
-                "path_item": video_item, 
-                "movie_item": movie_item,
-                "desc_item": desc_item, 
-                "status_item": status_item, 
-                "description": description,
-                "description_source": "Manual",
-                "languages": languages.copy(),
-                "task_type": task_type,
-                "worker": None, 
-                "thread": None
-            })
-            
-        else:
-            path_item = QStandardItem(os.path.basename(file_path))
-            path_item.setToolTip(os.path.dirname(file_path))
-            path_item.setEditable(False)
-            
-            movie_item = QStandardItem("")
-            movie_item.setEditable(False)
-            
-            desc_item = QStandardItem(description)
-            desc_item.setEditable(True)
-            desc_item.setToolTip(description)
-            
-            status_item = QStandardItem("Queued")
-            status_item.setEditable(False)
-            
-            self.model.appendRow([path_item, movie_item, desc_item, status_item])
-            self.tasks.append({
-                "path": file_path, 
-                "path_item": path_item, 
-                "movie_item": movie_item,
-                "desc_item": desc_item, 
-                "status_item": status_item, 
-                "description": description,
-                "description_source": "Manual",
-                "languages": languages.copy(),
-                "task_type": task_type,
-                "worker": None, 
-                "thread": None
-            })
+        if tasks_to_restore:
+            for task_info in tasks_to_restore:
+                task_data, model_row = self._prepare_task_data(
+                    task_info['path'], 
+                    task_info['languages'], 
+                    task_info['description'], 
+                    task_info['task_type']
+                )
+                
+                self.model.appendRow(model_row)
+                self.tasks.append(task_data)
+                
+                if task_info['tmdb_title']:
+                    task_data["movie_item"].setText(task_info['tmdb_title'])
+                    task_data["movie_item"].setToolTip(task_info['tmdb_title'])
+                    task_data["tmdb_title"] = task_info['tmdb_title']
+                    task_data["description_source"] = "Auto"
+                
+                summary = self.queue_manager.get_language_progress_summary(task_info['path'])
+                task_data["status_item"].setText(summary)
         
     def _get_language_display_text(self, lang_codes):
         if len(lang_codes) <= 2:
@@ -4581,28 +4520,130 @@ class MainWindow(FramelessWidget):
                         'requires_extraction': False
                     })
             
+            valid_tasks = []
             for task_info in tasks_to_add:
                 primary_file = task_info['primary_file']
                 
                 if any(task['path'] == primary_file and task['languages'] == self.selected_languages for task in self.tasks):
                     continue
                 
-                self.queue_manager.add_subtitle_to_queue(
-                    primary_file, 
-                    self.selected_languages.copy(), 
-                    "", 
-                    self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt"),
-                    task_info['task_type'],
-                    task_info['video_file'],
-                    task_info['requires_extraction']
-                )
-                
-                self._add_task_to_ui(primary_file, self.selected_languages.copy(), "", task_info['task_type'])
-                
-                video_file_for_lookup = task_info.get('video_file', primary_file)
-                self._start_tmdb_lookup(video_file_for_lookup if video_file_for_lookup != primary_file else primary_file)
+                valid_tasks.append(task_info)
             
-            self.update_button_states()
+            if valid_tasks:
+                self._batch_add_tasks(valid_tasks)
+    
+    def _batch_add_tasks(self, tasks_info_list):
+        files_for_tmdb = []
+        new_tasks = []
+        new_model_rows = []
+        
+        for task_info in tasks_info_list:
+            primary_file = task_info['primary_file']
+            
+            self.queue_manager.add_subtitle_to_queue(
+                primary_file, 
+                self.selected_languages.copy(), 
+                "", 
+                self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt"),
+                task_info['task_type'],
+                task_info['video_file'],
+                task_info['requires_extraction']
+            )
+            
+            task_data, model_row = self._prepare_task_data(primary_file, self.selected_languages.copy(), "", task_info['task_type'])
+            new_tasks.append(task_data)
+            new_model_rows.append(model_row)
+            
+            video_file_for_lookup = task_info.get('video_file', primary_file)
+            files_for_tmdb.append(video_file_for_lookup if video_file_for_lookup != primary_file else primary_file)
+        
+        for row in new_model_rows:
+            self.model.appendRow(row)
+        
+        self.tasks.extend(new_tasks)
+        self.update_button_states()
+        
+        for file_path in files_for_tmdb:
+            self._start_tmdb_lookup(file_path)
+    
+    def _prepare_task_data(self, file_path, languages, description, task_type="subtitle"):
+        if task_type == "video+subtitle":
+            if is_video_file(file_path):
+                video_path = file_path
+                subtitle_path = self._find_subtitle_pair(file_path)
+            else:
+                subtitle_path = file_path
+                video_path = self._find_video_pair(file_path)
+            
+            video_item = QStandardItem(os.path.basename(video_path))
+            video_item.setToolTip(os.path.dirname(video_path))
+            video_item.setEditable(False)
+            
+            movie_item = QStandardItem("")
+            movie_item.setEditable(False)
+            
+            desc_item = QStandardItem(description)
+            desc_item.setEditable(True)
+            desc_item.setToolTip(description)
+            
+            status_item = QStandardItem("Queued")
+            status_item.setEditable(False)
+            
+            subtitle_child = QStandardItem(f"{os.path.basename(subtitle_path)}")
+            subtitle_child.setToolTip(f"Subtitle: {subtitle_path}")
+            subtitle_child.setEditable(False)
+            
+            video_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
+            
+            task_data = {
+                "path": subtitle_path,
+                "video_path": video_path,
+                "path_item": video_item, 
+                "movie_item": movie_item,
+                "desc_item": desc_item, 
+                "status_item": status_item, 
+                "description": description,
+                "description_source": "Manual",
+                "languages": languages.copy(),
+                "task_type": task_type,
+                "worker": None, 
+                "thread": None
+            }
+            
+            model_row = [video_item, movie_item, desc_item, status_item]
+            
+        else:
+            path_item = QStandardItem(os.path.basename(file_path))
+            path_item.setToolTip(os.path.dirname(file_path))
+            path_item.setEditable(False)
+            
+            movie_item = QStandardItem("")
+            movie_item.setEditable(False)
+            
+            desc_item = QStandardItem(description)
+            desc_item.setEditable(True)
+            desc_item.setToolTip(description)
+            
+            status_item = QStandardItem("Queued")
+            status_item.setEditable(False)
+            
+            task_data = {
+                "path": file_path, 
+                "path_item": path_item, 
+                "movie_item": movie_item,
+                "desc_item": desc_item, 
+                "status_item": status_item, 
+                "description": description,
+                "description_source": "Manual",
+                "languages": languages.copy(),
+                "task_type": task_type,
+                "worker": None, 
+                "thread": None
+            }
+            
+            model_row = [path_item, movie_item, desc_item, status_item]
+        
+        return task_data, model_row
 
     def start_translation_queue(self):
         key_status = self.validate_both_api_keys()
