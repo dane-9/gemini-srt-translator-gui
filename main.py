@@ -1434,6 +1434,19 @@ class QueueStateManager:
             if lang_code in self.state["queue_state"][subtitle_path]["languages"]:
                 self.state["queue_state"][subtitle_path]["languages"][lang_code]["status"] = "skipped"
                 self._save_queue_state()
+                
+    def transform_to_video_subtitle(self, old_path, new_subtitle_path, new_video_path):
+        if old_path in self.state["queue_state"]:
+            entry_data = self.state["queue_state"].pop(old_path)
+
+            entry_data["task_type"] = "video+subtitle"
+            entry_data["video_file"] = new_video_path
+            entry_data["requires_audio_extraction"] = True
+            
+            self.state["queue_state"][new_subtitle_path] = entry_data
+            self._save_queue_state()
+            return True
+        return False
 
 class DialogTitleBarWidget(QWidget):
     def __init__(self, title="Dialog", parent=None):
@@ -4786,17 +4799,44 @@ class MainWindow(FramelessWidget):
             self.update_button_states()
 
     def _on_files_processed(self, prepared_tasks):
-        valid_tasks = []
-        for task_info in prepared_tasks:
-            primary_file = task_info['primary_file']
+        newly_added_tasks = []
+        unmatched_new_tasks = []
+        handled_new_tasks_indices = set()
+
+        new_subtitles = [(i, task) for i, task in enumerate(prepared_tasks) if task['task_type'] == 'subtitle']
+        new_videos = [(i, task) for i, task in enumerate(prepared_tasks) if task['task_type'] == 'video']
+
+        for task_idx, existing_task in enumerate(self.tasks):
+            if existing_task['task_type'] == 'video':
+                for i, new_sub_task_info in new_subtitles:
+                    if i in handled_new_tasks_indices: continue
+                    if _files_are_pair(new_sub_task_info['primary_file'], existing_task['path']):
+                        self._update_task_to_video_subtitle(task_idx, new_sub_task_info['primary_file'], existing_task['path'])
+                        handled_new_tasks_indices.add(i)
+                        break
             
-            if any(task['path'] == primary_file for task in self.tasks):
+            elif existing_task['task_type'] == 'subtitle':
+                for i, new_vid_task_info in new_videos:
+                    if i in handled_new_tasks_indices: continue
+                    if _files_are_pair(existing_task['path'], new_vid_task_info['primary_file']):
+                        self._update_task_to_video_subtitle(task_idx, existing_task['path'], new_vid_task_info['primary_file'])
+                        handled_new_tasks_indices.add(i)
+                        break
+
+        for i, task_info in enumerate(prepared_tasks):
+            if i in handled_new_tasks_indices:
                 continue
             
-            valid_tasks.append(task_info)
+            if any(t['path'] == task_info['primary_file'] for t in self.tasks):
+                continue
+
+            if task_info['task_type'] == 'video+subtitle' and any(t['path'] == task_info['primary_file'] for t in self.tasks):
+                continue
+            
+            unmatched_new_tasks.append(task_info)
         
-        if valid_tasks:
-            self._batch_add_tasks(valid_tasks)
+        if unmatched_new_tasks:
+            self._batch_add_tasks(unmatched_new_tasks)
 
     def _on_file_adder_finished(self):
         self.file_adder_thread = None
@@ -5586,6 +5626,32 @@ class MainWindow(FramelessWidget):
                     return parts[0].strip()
         
         return title_line
+        
+    def _update_task_to_video_subtitle(self, task_index, subtitle_path, video_path):
+        existing_task = self.tasks[task_index]
+        old_path = existing_task['path']
+
+        self.queue_manager.transform_to_video_subtitle(old_path, subtitle_path, video_path)
+
+        existing_task['path'] = subtitle_path
+        existing_task['video_path'] = video_path
+        existing_task['task_type'] = "video+subtitle"
+
+        path_item = existing_task['path_item']
+        path_item.setText(os.path.basename(video_path))
+        path_item.setToolTip(os.path.dirname(video_path))
+
+        while path_item.rowCount() > 0:
+            path_item.removeRow(0)
+
+        subtitle_child = QStandardItem(f"{os.path.basename(subtitle_path)}")
+        subtitle_child.setToolTip(f"Subtitle: {subtitle_path}")
+        subtitle_child.setEditable(False)
+        path_item.appendRow([subtitle_child, QStandardItem(""), QStandardItem(""), QStandardItem("")])
+
+        self.tree_view.viewport().update()
+
+    
 
 if __name__ == "__main__":
     if "--run-gst-subprocess" in sys.argv:
