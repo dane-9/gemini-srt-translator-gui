@@ -181,6 +181,7 @@ DEFAULT_SETTINGS = {
     "target_language": "English",
     "selected_languages": ["en"],
     "model_name": "gemini-2.5-flash",
+    "custom_model_name": "",
     "output_file_naming_pattern": "{original_name}.{lang_code}.{modifiers}.srt",
     "update_existing_queue_languages": False,
     "queue_on_exit": "clear_if_translated",
@@ -3964,6 +3965,133 @@ class CustomTitleBarWidget(QWidget):
     def close_window(self):
         if self.parent_window:
             self.parent_window.close()
+            
+class ModelSelectionDialog(CustomFramelessDialog):
+    def __init__(self, current_model="", api_key="", parent=None):
+        super().__init__("Select Model", parent)
+        self.setFixedSize(500, 600)
+        self.current_model = current_model
+        self.api_key = api_key
+        self.selected_model = ""
+        self.setup_ui()
+        self.load_models()
+        
+    def setup_ui(self):
+        layout = self.get_content_layout()
+        
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Type to filter models...")
+        self.search_input.textChanged.connect(self.filter_models)
+        search_layout.addWidget(self.search_input)
+        layout.addLayout(search_layout)
+        
+        self.model_list = QListWidget()
+        self.model_list.setAlternatingRowColors(True)
+        self.model_list.itemDoubleClicked.connect(self.accept)
+        layout.addWidget(self.model_list)
+        
+        button_layout = QHBoxLayout()
+        
+        self.refresh_btn = QPushButton("Refresh Models")
+        self.refresh_btn.clicked.connect(self.load_models)
+        button_layout.addWidget(self.refresh_btn)
+        
+        button_layout.addStretch()
+        
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.validate_and_accept)
+        self.button_box.rejected.connect(self.reject)
+        button_layout.addWidget(self.button_box)
+        
+        layout.addLayout(button_layout)
+    
+    def load_models(self):
+        if not self.api_key.strip():
+            CustomMessageBox.warning(self, "No API Key", "Please enter a valid API key first.")
+            return
+            
+        self.model_list.clear()
+        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText("Loading...")
+        
+        try:
+            cmd = ["gst", "list-models", "-k", self.api_key]
+            
+            creation_flags = 0
+            if os.name == 'nt':
+                creation_flags = subprocess.CREATE_NO_WINDOW
+            
+            result = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                timeout=30,
+                creationflags=creation_flags
+            )
+            
+            if result.returncode == 0:
+                self.parse_models(result.stdout)
+            else:
+                self.add_fallback_models()
+                
+        except Exception:
+            self.add_fallback_models()
+        
+        self.refresh_btn.setEnabled(True)
+        self.refresh_btn.setText("Refresh Models")
+    
+    def parse_models(self, output):
+        lines = output.strip().split('\n')
+        models = []
+        
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith("Available models:") and not line.startswith("gemma-"):
+                models.append(line)
+        
+        models.sort()
+        
+        for model in models:
+            item = QListWidgetItem(model)
+            if model == self.current_model:
+                item.setSelected(True)
+                self.model_list.setCurrentItem(item)
+            self.model_list.addItem(item)
+    
+    def add_fallback_models(self):
+        fallback_models = [
+            "gemini-1.5-pro-latest", "gemini-1.5-pro", "gemini-1.5-flash-latest", 
+            "gemini-1.5-flash", "gemini-2.5-pro", "gemini-2.5-flash",
+            "gemini-2.5-flash-lite-preview-06-17", "gemini-2.0-flash", "gemini-2.0-pro-exp"
+        ]
+        
+        for model in fallback_models:
+            item = QListWidgetItem(model)
+            if model == self.current_model:
+                item.setSelected(True)
+                self.model_list.setCurrentItem(item)
+            self.model_list.addItem(item)
+    
+    def filter_models(self, search_text):
+        search_text = search_text.lower()
+        
+        for i in range(self.model_list.count()):
+            item = self.model_list.item(i)
+            should_show = search_text in item.text().lower()
+            item.setHidden(not should_show)
+    
+    def validate_and_accept(self):
+        current_item = self.model_list.currentItem()
+        if not current_item:
+            CustomMessageBox.warning(self, "No Selection", "Please select a model.")
+            return
+        
+        self.selected_model = current_item.text()
+        self.accept()
+    
+    def get_selected_model(self):
+        return self.selected_model
 
 class MainWindow(FramelessWidget):
     def __init__(self):
@@ -4061,11 +4189,10 @@ class MainWindow(FramelessWidget):
         self.tmdb_api_key_edit.textChanged.connect(lambda: self._on_key_text_changed('tmdb'))
         api_keys_model_layout.addWidget(self.tmdb_api_key_edit)
         
-        self.model_name_edit = CustomLineEdit()
-        self.model_name_edit.setText(self.settings.get("model_name", "gemini-2.5-flash"))
-        self.model_name_edit.set_right_text("Model Used", font_size=9, italic=False, color="#555555")
-        self.model_name_edit.textChanged.connect(lambda text: self.settings.update({"model_name": text}))
-        api_keys_model_layout.addWidget(self.model_name_edit)
+        self.model_combo = QComboBox()
+        self.model_combo.currentTextChanged.connect(self.on_model_changed)
+        self.populate_model_combo()
+        api_keys_model_layout.addWidget(self.model_combo)
         
         config_layout.addRow(api_keys_model_layout)
         
@@ -4804,7 +4931,6 @@ class MainWindow(FramelessWidget):
             self.settings["gemini_api_key"] = self.api_key_edit.text()
             self.settings["gemini_api_key2"] = self.api_key2_edit.text()
             self.settings["tmdb_api_key"] = self.tmdb_api_key_edit.text()
-            self.settings["model_name"] = self.model_name_edit.text()
             self.settings["selected_languages"] = self.selected_languages
             
             config_dir = os.path.dirname(CONFIG_FILE)
@@ -5092,7 +5218,7 @@ class MainWindow(FramelessWidget):
             target_languages=index.data(LanguagesRole),
             api_key=self.api_key_edit.text().strip(), 
             api_key2=self.api_key2_edit.text().strip(),
-            model_name=self.model_name_edit.text().strip(), 
+            model_name=self.settings.get("model_name", "gemini-2.5-flash"), 
             settings=self.settings,
             description=index.data(DescriptionRole),
             queue_manager=self.queue_manager,
@@ -5895,6 +6021,76 @@ class MainWindow(FramelessWidget):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+            
+    def populate_model_combo(self):
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        
+        recommended_models = [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite-preview-06-17", 
+            "gemini-2.5-pro"
+        ]
+        
+        current_model = self.settings.get("model_name", "gemini-2.5-flash")
+        custom_model = self.settings.get("custom_model_name", "")
+        
+        for model in recommended_models:
+            self.model_combo.addItem(model)
+        
+        if custom_model and custom_model not in recommended_models:
+            self.model_combo.addItem(custom_model)
+        
+        self.model_combo.addItem("Show All Models...")
+        
+        if current_model in [self.model_combo.itemText(i) for i in range(self.model_combo.count())]:
+            index = self.model_combo.findText(current_model)
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
+        else:
+            self.model_combo.setCurrentIndex(0)
+        
+        self.model_combo.blockSignals(False)
+    
+    def on_model_changed(self, model_name):
+        if model_name == "Show All Models...":
+            self.open_model_selection_dialog()
+            return
+        
+        self.settings["model_name"] = model_name
+        self._save_settings()
+    
+    def open_model_selection_dialog(self):
+        current_model = self.settings.get("model_name", "gemini-2.5-flash")
+        api_key = self.api_key_edit.text().strip()
+        
+        previous_index = self.model_combo.currentIndex()
+        
+        dialog = ModelSelectionDialog(current_model, api_key, self)
+        if dialog.exec():
+            selected_model = dialog.get_selected_model()
+            if selected_model:
+                self.update_model_selection(selected_model)
+        else:
+            self.model_combo.blockSignals(True)
+            self.model_combo.setCurrentIndex(previous_index)
+            self.model_combo.blockSignals(False)
+    
+    def update_model_selection(self, model_name):
+        recommended_models = [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite-preview-06-17", 
+            "gemini-2.5-pro"
+        ]
+        
+        if model_name in recommended_models:
+            self.settings["custom_model_name"] = ""
+        else:
+            self.settings["custom_model_name"] = model_name
+        
+        self.settings["model_name"] = model_name
+        self._save_settings()
+        self.populate_model_combo()
 
 if __name__ == "__main__":
     if "--run-gst-subprocess" in sys.argv:
