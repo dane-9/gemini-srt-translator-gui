@@ -31,6 +31,8 @@ TaskTypeRole = Qt.UserRole + 5
 DescriptionSourceRole = Qt.UserRole + 6
 TMDBTitleRole = Qt.UserRole + 7
 
+APP_VERSION = "1.2.0"
+
 def is_compiled():
     result = os.path.normcase(os.path.splitext(sys.argv[0])[1]) == '.exe'
     return result
@@ -1581,19 +1583,27 @@ class DialogTitleBarWidget(QWidget):
             self.mouse_pos = None
 
 class GradientTitleWidget(QWidget):
-    def __init__(self, text="Gemini SRT Translator", parent=None):
+    def __init__(self, text="Gemini SRT Translator", version="", parent=None):
         super().__init__(parent)
         self.text = text
+        self.version = version
         self.setMinimumHeight(30)
         self.setMaximumHeight(40)
         
         self.font = QFont("Arial", 13, QFont.Bold)
         self.setFont(self.font)
         
+        self.version_font = QFont("Arial", 6)
+        
         fm = self.fontMetrics()
         text_width = fm.horizontalAdvance(self.text)
-        self.setMinimumWidth(text_width)
-        self.setMaximumWidth(text_width)
+        
+        version_fm = QFontMetrics(self.version_font)
+        version_width = version_fm.horizontalAdvance(self.version) if self.version else 0
+        
+        total_width = max(text_width, text_width + version_width + 10)
+        self.setMinimumWidth(total_width)
+        self.setMaximumWidth(total_width)
     
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -1603,8 +1613,8 @@ class GradientTitleWidget(QWidget):
         
         gradient = QLinearGradient(content_rect.left(), 0, content_rect.right(), 0)
         gradient.setColorAt(0.0, QColor("#4995ff"))
-        gradient.setColorAt(0.7, QColor("#a981d8"))
-        gradient.setColorAt(1.0, QColor("#e84d62"))
+        gradient.setColorAt(0.6, QColor("#a981d8"))
+        gradient.setColorAt(0.9, QColor("#e84d62"))
         
         pen = QPen()
         pen.setBrush(gradient)
@@ -1615,18 +1625,45 @@ class GradientTitleWidget(QWidget):
         
         fm = painter.fontMetrics()
         text_rect = fm.boundingRect(self.text)
-        x = content_rect.left() + (content_rect.width() - text_rect.width()) // 2
+        
+        x = content_rect.left() + (content_rect.width() - text_rect.width()) // 2 - 14
         y = content_rect.top() + (content_rect.height() + text_rect.height()) // 2 - fm.descent()
         
         painter.drawText(x, y, self.text)
+        
+        if self.version:
+            painter.setFont(self.version_font)
+            version_fm = painter.fontMetrics()
+            
+            version_color = QColor(160, 160, 160, 160)
+            painter.setPen(version_color)
+            
+            version_rect = version_fm.boundingRect(self.version)
+            version_x = content_rect.right() - version_rect.width() - 7
+            version_y = content_rect.bottom() - version_fm.descent() - 12
+            
+            painter.drawText(version_x, version_y, self.version)
     
     def setText(self, text):
         self.text = text
+        self._updateSize()
+        self.update()
+    
+    def setVersion(self, version):
+        self.version = version
+        self._updateSize()
+        self.update()
+    
+    def _updateSize(self):
         fm = self.fontMetrics()
         text_width = fm.horizontalAdvance(self.text)
-        self.setMinimumWidth(text_width)
-        self.setMaximumWidth(text_width)
-        self.update()
+        
+        version_fm = QFontMetrics(self.version_font)
+        version_width = version_fm.horizontalAdvance(self.version) if self.version else 0
+        
+        total_width = max(text_width, text_width + version_width + 10)
+        self.setMinimumWidth(total_width)
+        self.setMaximumWidth(total_width)
 
 class HoverToolButton(QToolButton):
     def __init__(self, svg_path, normal_color="#A0A0A0", hover_color="white", disabled_color="#444444", parent=None):
@@ -3785,7 +3822,7 @@ class CustomTitleBarWidget(QWidget):
         layout.setContentsMargins(10, 0, 0, 0)
         layout.setSpacing(5)
         
-        self.title_widget = GradientTitleWidget("Gemini SRT Translator")
+        self.title_widget = GradientTitleWidget("Gemini SRT Translator", f"v{APP_VERSION}")
         self.setObjectName("AppTitle")
         layout.addWidget(self.title_widget)
         
