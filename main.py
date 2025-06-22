@@ -186,6 +186,7 @@ DEFAULT_SETTINGS = {
     "use_gst_parameters": False,
     "use_model_tuning": False,
     "use_tmdb": False,
+    "tmdb_concurrent_requests": 3,
     "tmdb_movie_template": "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}",
     "tmdb_episode_template": "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}",
     "description": "", 
@@ -2208,6 +2209,19 @@ class SettingsDialog(CustomFramelessDialog):
         
         tmdb_layout.addWidget(episode_section)
         
+        concurrent_section = QWidget()
+        concurrent_layout = QFormLayout(concurrent_section)
+        concurrent_layout.setContentsMargins(0, 5, 0, 0)
+        
+        self.concurrent_requests_spin = QSpinBox()
+        self.concurrent_requests_spin.setRange(1, 10)
+        self.concurrent_requests_spin.setValue(self.settings.get("tmdb_concurrent_requests", 3))
+        self.concurrent_requests_spin.setMaximumWidth(150)
+        self.concurrent_requests_spin.setToolTip("Number of simultaneous TMDB API requests (1-10). Higher values = faster but may hit rate limits.")
+        concurrent_layout.addRow("Concurrent Requests:", self.concurrent_requests_spin)
+        
+        tmdb_layout.addWidget(concurrent_section)
+        
         layout.addWidget(self.tmdb_content_widget)
         layout.addStretch()
         
@@ -2321,6 +2335,7 @@ class SettingsDialog(CustomFramelessDialog):
         self.settings["tmdb_episode_template"] = "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}"
         self._update_movie_template_display()
         self._update_episode_template_display()
+        self.concurrent_requests_spin.setValue(3)
                 
         cleanup_defaults = {
             "cleanup_audio_on_success": True,
@@ -2363,7 +2378,8 @@ class SettingsDialog(CustomFramelessDialog):
         s["use_tmdb"] = self.tmdb_checkbox.isChecked()
         s["tmdb_movie_template"] = self.settings.get("tmdb_movie_template", "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}")
         s["tmdb_episode_template"] = self.settings.get("tmdb_episode_template", "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}")
-            
+        s["tmdb_concurrent_requests"] = self.concurrent_requests_spin.value()
+         
         for key, checkbox in self.cleanup_checkboxes.items():
             s[key] = checkbox.isChecked()
         
@@ -3772,7 +3788,6 @@ class MainWindow(FramelessWidget):
         
         self.setAcceptDrops(True)
         
-        self.tmdb_semaphore = threading.Semaphore(3)
         self.tmdb_queue = []
         
         icon_path = get_resource_path("Files/icon.png")
@@ -3789,6 +3804,7 @@ class MainWindow(FramelessWidget):
         self.stop_after_current_task = False
         self._exit_timer = None
         
+        self.tmdb_semaphore = threading.Semaphore(self.settings.get("tmdb_concurrent_requests", 3))
         self.tmdb_lookup_workers = {}
         self.tmdb_threads = {}
         
@@ -5100,7 +5116,12 @@ class MainWindow(FramelessWidget):
     def open_settings_dialog(self):
         dialog = SettingsDialog(self.settings.copy(), self)
         if dialog.exec():
-            self.settings.update(dialog.get_settings())
+            new_settings = dialog.get_settings()
+            
+            if not self._update_tmdb_semaphore_if_needed(new_settings):
+                CustomMessageBox.information(self, "Settings Updated", "TMDB concurrent requests setting will take effect after current TMDB operations complete.")
+            
+            self.settings.update(new_settings)
             self._save_settings()
 
     def update_button_states(self):
@@ -5126,11 +5147,12 @@ class MainWindow(FramelessWidget):
         elif has_tmdb_operations:
             total_count = len(self.tmdb_lookup_workers)
             queued_count = len(self.tmdb_queue)
+            max_concurrent = self.settings.get("tmdb_concurrent_requests", 3)
             
             if total_count > 0 and queued_count > 0:
-                self.start_stop_btn.setText(f"Fetching TMDB Info... ({total_count} active, {queued_count} queued)")
+                self.start_stop_btn.setText(f"Fetching TMDB Info... ({total_count}/{max_concurrent} active, {queued_count} queued)")
             elif total_count > 1:
-                self.start_stop_btn.setText(f"Fetching TMDB Info... ({total_count} active)")
+                self.start_stop_btn.setText(f"Fetching TMDB Info... ({total_count}/{max_concurrent} active)")
             else:
                 self.start_stop_btn.setText("Fetching TMDB Info...")
             self.start_stop_btn.setEnabled(False)
@@ -5466,7 +5488,8 @@ class MainWindow(FramelessWidget):
             self.tmdb_queue.append((task_id, lookup_path))
         
     def _process_tmdb_queue(self):
-        while len(self.tmdb_lookup_workers) < 3 and self.tmdb_queue:
+        max_concurrent = self.settings.get("tmdb_concurrent_requests", 3)
+        while len(self.tmdb_lookup_workers) < max_concurrent and self.tmdb_queue:
             task_id, lookup_path = self.tmdb_queue.pop(0)
             
             if task_id in self.tmdb_lookup_workers:
@@ -5577,6 +5600,18 @@ class MainWindow(FramelessWidget):
                 break
         
         self.update_button_states()
+        
+    def _update_tmdb_semaphore_if_needed(self, new_settings):
+        old_count = getattr(self.tmdb_semaphore, '_value', 3)
+        new_count = new_settings.get("tmdb_concurrent_requests", 3)
+        
+        if old_count != new_count:
+            if self.tmdb_lookup_workers:
+                return False
+
+            self.tmdb_semaphore = threading.Semaphore(new_count)
+            return True
+        return True
         
     def _extract_movie_name_from_description(self, description):
         if not description:
