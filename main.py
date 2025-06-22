@@ -2820,6 +2820,7 @@ class CustomTaskModel(QStandardItemModel):
         
         return index.siblingAtColumn(0).data(DescriptionSourceRole) or "Manual"
 
+      
 class TranslationWorker(QObject):
     finished = Signal(int, str, bool)
     progress_update = Signal(int, int, str)
@@ -2842,6 +2843,7 @@ class TranslationWorker(QObject):
         self.force_cancelled = False
         self.current_language = None
         self.process = None
+        self.specific_error = None
         self.is_extracting = False
         self.pending_force_cancellation = False
     
@@ -2935,6 +2937,7 @@ class TranslationWorker(QObject):
             
             if not video_file or not os.path.exists(video_file):
                 self.status_message.emit(self.task_index, "Video file not found")
+                self.specific_error = "Failed: Video file not found"
                 return False
             
             self.status_message.emit(self.task_index, "Extracting Audio")
@@ -2952,11 +2955,23 @@ class TranslationWorker(QObject):
             cmd.extend(["--model_name", self.model_name])
             
             extracted_srt_to_delete = None
+            self.specific_error = None
             
             def audio_line_callback(line):
                 nonlocal extracted_srt_to_delete
                 if not line: return
                 clean_line = line.strip()
+                
+                if "FFmpeg is not installed" in clean_line:
+                    self.specific_error = "Failed: FFmpeg not installed"
+                    return
+                elif "does not exist" in clean_line and "Video file" in clean_line:
+                    self.specific_error = "Failed: Video file not found"
+                    return
+                elif "Failed to process video" in clean_line:
+                    self.specific_error = "Failed: Could not process audio"
+                    return
+
                 if "Starting audio extraction" in clean_line:
                     self.progress_update.emit(self.task_index, 30, "Starting audio extraction...")
                 elif "Success! Audio saved as:" in clean_line:
@@ -2991,8 +3006,11 @@ class TranslationWorker(QObject):
                 self.status_message.emit(self.task_index, "Audio extraction successful")
                 return True
             else:
+                if self.specific_error:
+                    self.status_message.emit(self.task_index, self.specific_error)
+                else:
+                    self.status_message.emit(self.task_index, "Audio extraction failed")
                 self.queue_manager.set_audio_extraction_status(self.input_file_path, "failed")
-                self.status_message.emit(self.task_index, "Audio extraction failed")
                 return False
     
         except Exception as e:
@@ -3018,21 +3036,50 @@ class TranslationWorker(QObject):
         self.status_message.emit(self.task_index, simple_status)
         
         found_completion = [False]
+        self.specific_error = None
 
         def translation_line_callback(line):
             if not line: return
             line = line.strip()
 
-            if "Resuming from line" in line:
+            if "FFmpeg is not installed" in line:
+                self.specific_error = "Failed: FFmpeg not installed"
+                return
+            elif "does not exist" in line and ("Input file" in line or "Video file" in line or "Audio file" in line):
+                self.specific_error = "Failed: Source file not found"
+                return
+            elif "Failed to extract subtitles from video file" in line:
+                self.specific_error = "Failed: Could not extract subtitles"
+                return
+            elif "Failed to process video" in line:
+                self.specific_error = "Failed: Could not process audio"
+                return
+
+            elif "All API quotas exceeded, waiting" in line:
+                wait_match = re.search(r"waiting (\d+) seconds", line)
+                wait_time = wait_match.group(1) if wait_match else "..."
+                self.status_message.emit(self.task_index, f"API Quota Exceeded. Waiting {wait_time}s")
+                return
+            elif "API quota exceeded! Switching to API" in line:
+                api_match = re.search(r"Switching to API (\d+)", line)
+                api_num = api_match.group(1) if api_match else "#?"
+                self.status_message.emit(self.task_index, f"Quota Hit. Switching to API Key {api_num}...")
+                return
+            elif "Sending last batch again..." in line:
+                self.status_message.emit(self.task_index, "Invalid response, retrying batch...")
+                return
+
+            elif "Resuming from line" in line:
                 resume_match = re.search(r"Resuming from line (\d+)", line)
                 if resume_match:
                     resume_line = resume_match.group(1)
                     self.status_message.emit(self.task_index, f"Resuming {lang_name} from line {resume_line}")
                 return
-
+            
             progress_match = re.search(r"Translating:\s*\|.*\|\s*(\d+)%\s*\(([^)]+)\)[^|]*\|\s*(Thinking|Processing)", line)
             
             if progress_match:
+                self.status_message.emit(self.task_index, simple_status)
                 lang_percent = int(progress_match.group(1))
                 details = progress_match.group(2)
                 state = progress_match.group(3)
@@ -3054,6 +3101,9 @@ class TranslationWorker(QObject):
 
         if self._should_force_cancel() or return_code == -1:
             self._cleanup_current_language_only()
+            return False
+        
+        if self.specific_error:
             return False
         
         return return_code == 0 and found_completion[0]
@@ -3395,6 +3445,8 @@ class TranslationWorker(QObject):
         queue_entry = self.queue_manager.state["queue_state"].get(self.input_file_path, {})
         task_type = queue_entry.get("task_type", "subtitle")
         
+        self.specific_error = None
+        
         success = False
         if task_type == "video+subtitle":
             success = self._handle_video_subtitle_workflow()
@@ -3416,7 +3468,8 @@ class TranslationWorker(QObject):
         elif success:
             self.finished.emit(self.task_index, "Translated", True)
         else:
-            self.finished.emit(self.task_index, "Translation failed", False)
+            final_message = self.specific_error or "Translation failed"
+            self.finished.emit(self.task_index, final_message, False)
             
     def _handle_video_subtitle_workflow(self):
         languages_needing_work = []
