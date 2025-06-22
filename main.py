@@ -3065,6 +3065,15 @@ class TranslationWorker(QObject):
                 api_num = api_match.group(1) if api_match else "#?"
                 self.status_message.emit(self.task_index, f"Quota Hit. Switching to API Key {api_num}...")
                 return
+            elif "Gemini has returned an unexpected response. Expected" in line:
+                self.status_message.emit(self.task_index, "API Error (Size Mismatch), retrying...")
+                return
+            elif "Gemini has returned an empty translation for line" in line:
+                self.status_message.emit(self.task_index, "API Error (Empty Line), retrying...")
+                return
+            elif "Gemini has returned an unexpected line:" in line:
+                self.status_message.emit(self.task_index, "API Error (Bad Index), retrying...")
+                return
             elif "Sending last batch again..." in line:
                 self.status_message.emit(self.task_index, "Invalid response, retrying batch...")
                 return
