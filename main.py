@@ -187,6 +187,7 @@ DEFAULT_SETTINGS = {
     "use_model_tuning": False,
     "use_tmdb": False,
     "tmdb_concurrent_requests": 3,
+    "tmdb_request_timeout": 10,
     "tmdb_cache_expiry_days": 365,
     "tmdb_cache_size_limit_mb": 150,
     "tmdb_auto_cleanup_cache": True,
@@ -761,7 +762,7 @@ class TMDBLookupWorker(QObject):
     finished = Signal(str, str, bool)
     status_update = Signal(str, str)
 
-    def __init__(self, task_id, lookup_file_path, api_key, movie_template, episode_template, semaphore):
+    def __init__(self, task_id, lookup_file_path, api_key, movie_template, episode_template, semaphore, settings=None):
         super().__init__()
         self.task_id = task_id
         self.lookup_file_path = lookup_file_path
@@ -770,6 +771,7 @@ class TMDBLookupWorker(QObject):
         self.episode_template = episode_template
         self.base_url = "https://api.themoviedb.org/3"
         self.semaphore = semaphore
+        self.settings = settings or {}
 
     def _trim_show_data(self, full_show_data):
         if not full_show_data:
@@ -867,9 +869,11 @@ class TMDBLookupWorker(QObject):
             params = {}
         params['api_key'] = self.api_key
         
+        timeout = self.settings.get("tmdb_request_timeout", 10)
+        
         for attempt in range(retries):
             try:
-                response = requests.get(f"{self.base_url}/{endpoint}", params=params, timeout=10)
+                response = requests.get(f"{self.base_url}/{endpoint}", params=params, timeout=timeout)
                 if response.status_code == 200:
                     return response.json()
                 elif response.status_code == 429:
@@ -2249,18 +2253,26 @@ class SettingsDialog(CustomFramelessDialog):
         
         tmdb_layout.addWidget(episode_section)
         
-        concurrent_section = QWidget()
-        concurrent_layout = QFormLayout(concurrent_section)
-        concurrent_layout.setContentsMargins(0, 5, 0, 0)
+        request_section = QWidget()
+        request_layout = QFormLayout(request_section)
+        request_layout.setContentsMargins(0, 5, 0, 0)
         
         self.concurrent_requests_spin = QSpinBox()
         self.concurrent_requests_spin.setRange(1, 10)
         self.concurrent_requests_spin.setValue(self.settings.get("tmdb_concurrent_requests", 3))
         self.concurrent_requests_spin.setMaximumWidth(150)
         self.concurrent_requests_spin.setToolTip("Number of simultaneous TMDB API requests (1-10). Higher values = faster but may hit rate limits.")
-        concurrent_layout.addRow("Concurrent Requests:", self.concurrent_requests_spin)
+        request_layout.addRow("Concurrent Requests:", self.concurrent_requests_spin)
         
-        tmdb_layout.addWidget(concurrent_section)
+        self.request_timeout_spin = QSpinBox()
+        self.request_timeout_spin.setRange(5, 60)
+        self.request_timeout_spin.setValue(self.settings.get("tmdb_request_timeout", 10))
+        self.request_timeout_spin.setMaximumWidth(150)
+        self.request_timeout_spin.setSuffix(" seconds")
+        self.request_timeout_spin.setToolTip("Timeout for TMDB API requests (5-60 seconds). Lower values fail faster on slow connections.")
+        request_layout.addRow("Request Timeout:", self.request_timeout_spin)
+        
+        tmdb_layout.addWidget(request_section)
         
         cache_section = QWidget()
         cache_layout = QVBoxLayout(cache_section)
@@ -2407,6 +2419,7 @@ class SettingsDialog(CustomFramelessDialog):
         
         self.tmdb_checkbox.setChecked(False)
         self.concurrent_requests_spin.setValue(3)
+        self.request_timeout_spin.setValue(10)
         self.auto_cleanup_checkbox.setChecked(True)
         self.cache_expiry_spin.setValue(365)
         self.cache_size_spin.setValue(150)
@@ -2463,6 +2476,7 @@ class SettingsDialog(CustomFramelessDialog):
         
         s["use_tmdb"] = self.tmdb_checkbox.isChecked()
         s["tmdb_concurrent_requests"] = self.concurrent_requests_spin.value()
+        s["tmdb_request_timeout"] = self.request_timeout_spin.value()
         s["tmdb_auto_cleanup_cache"] = self.auto_cleanup_checkbox.isChecked()
         s["tmdb_cache_expiry_days"] = self.cache_expiry_spin.value()
         s["tmdb_cache_size_limit_mb"] = self.cache_size_spin.value()
@@ -5591,7 +5605,7 @@ class MainWindow(FramelessWidget):
             movie_template = self.settings.get("tmdb_movie_template", "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}")
             episode_template = self.settings.get("tmdb_episode_template", "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}")
             
-            worker = TMDBLookupWorker(task_id, lookup_path, api_key, movie_template, episode_template, self.tmdb_semaphore)
+            worker = TMDBLookupWorker(task_id, lookup_path, api_key, movie_template, episode_template, self.tmdb_semaphore, self.settings)
             worker.tmdb_cache = self.tmdb_cache
             thread = QThread(self)
             
