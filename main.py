@@ -2478,7 +2478,7 @@ class SettingsDialog(CustomFramelessDialog):
         
         self.toggle_gst_settings(False)
         self.toggle_model_settings(False)
-        self.toggle_tmdb_settings(False)
+        self.toggle_tmdb_settings(True)
         self.toggle_cache_expiry(True)
     
     def toggle_cache_expiry(self, enabled):
