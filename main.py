@@ -187,6 +187,9 @@ DEFAULT_SETTINGS = {
     "use_model_tuning": False,
     "use_tmdb": False,
     "tmdb_concurrent_requests": 3,
+    "tmdb_cache_expiry_days": 365,
+    "tmdb_cache_size_limit_mb": 150,
+    "tmdb_auto_cleanup_cache": True,
     "tmdb_movie_template": "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}",
     "tmdb_episode_template": "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}",
     "description": "", 
@@ -1019,8 +1022,9 @@ def _validate_tmdb_api_key(api_key):
         return False
         
 class TMDBCacheManager:
-    def __init__(self, cache_file_path):
+    def __init__(self, cache_file_path, settings=None):
         self.cache_file_path = cache_file_path
+        self.settings = settings or {}
         self.cache = self._load_cache()
         self._lock = threading.RLock()
         self._cleanup_expired_cache()
@@ -1050,8 +1054,12 @@ class TMDBCacheManager:
                 print(f"Error saving TMDB cache: {e}")
     
     def _cleanup_expired_cache(self):
+        if not self.settings.get("tmdb_auto_cleanup_cache", True):
+            return
+            
         with self._lock:
-            cutoff = datetime.datetime.now() - timedelta(days=365)
+            expiry_days = self.settings.get("tmdb_cache_expiry_days", 365)
+            cutoff = datetime.datetime.now() - timedelta(days=expiry_days)
             expired_shows = []
             
             for show_key, show_data in self.cache.items():
@@ -1071,6 +1079,38 @@ class TMDBCacheManager:
             
             if expired_shows:
                 self._save_cache()
+            
+            self._cleanup_oversized_cache()
+            
+    def _cleanup_oversized_cache(self):
+        try:
+            if os.path.exists(self.cache_file_path):
+                file_size_mb = os.path.getsize(self.cache_file_path) / (1024 * 1024)
+                max_size_mb = self.settings.get("tmdb_cache_size_limit_mb", 150)
+                
+                if file_size_mb > max_size_mb:
+                    entries_by_date = []
+                    for show_key, show_data in self.cache.items():
+                        last_used_str = show_data.get("last_used", "")
+                        if last_used_str:
+                            try:
+                                last_used = datetime.datetime.fromisoformat(last_used_str.replace('Z', ''))
+                                entries_by_date.append((last_used, show_key))
+                            except ValueError:
+                                entries_by_date.append((datetime.datetime.min, show_key))
+                        else:
+                            entries_by_date.append((datetime.datetime.min, show_key))
+                    
+                    entries_by_date.sort()
+                    
+                    entries_to_remove = len(entries_by_date) // 4
+                    if entries_to_remove > 0:
+                        for _, show_key in entries_by_date[:entries_to_remove]:
+                            del self.cache[show_key]
+                        
+                        self._save_cache()
+        except Exception as e:
+            pass
     
     def get_cached_show(self, show_title):
         with self._lock:
@@ -2222,10 +2262,45 @@ class SettingsDialog(CustomFramelessDialog):
         
         tmdb_layout.addWidget(concurrent_section)
         
+        cache_section = QWidget()
+        cache_layout = QVBoxLayout(cache_section)
+        cache_layout.setContentsMargins(0, 0, 0, 0)
+        cache_layout.setSpacing(10)
+        
+        self.auto_cleanup_checkbox = QCheckBox("Auto-cleanup old cache entries")
+        self.auto_cleanup_checkbox.setChecked(self.settings.get("tmdb_auto_cleanup_cache", True))
+        self.auto_cleanup_checkbox.stateChanged.connect(self.toggle_cache_expiry)
+        cache_layout.addWidget(self.auto_cleanup_checkbox)
+        
+        self.cache_expiry_widget = QWidget()
+        expiry_layout = QFormLayout(self.cache_expiry_widget)
+        expiry_layout.setContentsMargins(20, 0, 0, 0)
+        
+        self.cache_expiry_spin = QSpinBox()
+        self.cache_expiry_spin.setRange(1, 999)
+        self.cache_expiry_spin.setValue(self.settings.get("tmdb_cache_expiry_days", 365))
+        self.cache_expiry_spin.setMaximumWidth(150)
+        self.cache_expiry_spin.setSuffix(" days")
+        expiry_layout.addRow("Cache Expiry:", self.cache_expiry_spin)
+        
+        cache_layout.addWidget(self.cache_expiry_widget)
+        
+        size_layout = QFormLayout()
+        self.cache_size_spin = QSpinBox()
+        self.cache_size_spin.setRange(10, 1000)
+        self.cache_size_spin.setValue(self.settings.get("tmdb_cache_size_limit_mb", 150))
+        self.cache_size_spin.setMaximumWidth(150)
+        self.cache_size_spin.setSuffix(" MB")
+        size_layout.addRow("Cache Size Limit:", self.cache_size_spin)
+        
+        cache_layout.addLayout(size_layout)
+        tmdb_layout.addWidget(cache_section)
+        
         layout.addWidget(self.tmdb_content_widget)
         layout.addStretch()
         
         self.toggle_tmdb_settings(self.tmdb_checkbox.isChecked())
+        self.toggle_cache_expiry(self.auto_cleanup_checkbox.isChecked())
         
         return page
         
@@ -2331,11 +2406,14 @@ class SettingsDialog(CustomFramelessDialog):
                 self.model_checkboxes[key].setChecked(default_val)
         
         self.tmdb_checkbox.setChecked(False)
+        self.concurrent_requests_spin.setValue(3)
+        self.auto_cleanup_checkbox.setChecked(True)
+        self.cache_expiry_spin.setValue(365)
+        self.cache_size_spin.setValue(150)
         self.settings["tmdb_movie_template"] = "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}"
         self.settings["tmdb_episode_template"] = "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}"
         self._update_movie_template_display()
         self._update_episode_template_display()
-        self.concurrent_requests_spin.setValue(3)
                 
         cleanup_defaults = {
             "cleanup_audio_on_success": True,
@@ -2351,6 +2429,14 @@ class SettingsDialog(CustomFramelessDialog):
         self.toggle_gst_settings(False)
         self.toggle_model_settings(False)
         self.toggle_tmdb_settings(False)
+        self.toggle_cache_expiry(True)
+    
+    def toggle_cache_expiry(self, enabled):
+        self.cache_expiry_widget.setEnabled(enabled)
+        if not enabled:
+            self.cache_expiry_widget.setStyleSheet("color: grey;")
+        else:
+            self.cache_expiry_widget.setStyleSheet("")
     
     def get_settings(self):
         s = self.settings.copy()
@@ -2376,10 +2462,13 @@ class SettingsDialog(CustomFramelessDialog):
             s[key] = checkbox.isChecked()
         
         s["use_tmdb"] = self.tmdb_checkbox.isChecked()
+        s["tmdb_concurrent_requests"] = self.concurrent_requests_spin.value()
+        s["tmdb_auto_cleanup_cache"] = self.auto_cleanup_checkbox.isChecked()
+        s["tmdb_cache_expiry_days"] = self.cache_expiry_spin.value()
+        s["tmdb_cache_size_limit_mb"] = self.cache_size_spin.value()
         s["tmdb_movie_template"] = self.settings.get("tmdb_movie_template", "Overview: {movie.overview}\n\n{movie.title} - {movie.year}\nGenre(s): {movie.genres}")
         s["tmdb_episode_template"] = self.settings.get("tmdb_episode_template", "Episode Overview: {episode.overview}\n\n{show.title} {episode.number} - {episode.title}\nShow Overview: {show.overview}")
-        s["tmdb_concurrent_requests"] = self.concurrent_requests_spin.value()
-         
+            
         for key, checkbox in self.cleanup_checkboxes.items():
             s[key] = checkbox.isChecked()
         
@@ -3962,7 +4051,7 @@ class MainWindow(FramelessWidget):
         self.queue_manager = QueueStateManager(queue_state_file)
         
         tmdb_cache_file = get_persistent_path(os.path.join("Files", "tmdb_cache.json"))
-        self.tmdb_cache = TMDBCacheManager(tmdb_cache_file)
+        self.tmdb_cache = TMDBCacheManager(tmdb_cache_file, self.settings)
         
         self._sync_ui_with_queue_state()
         
