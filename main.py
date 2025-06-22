@@ -187,7 +187,7 @@ DEFAULT_SETTINGS = {
     "existing_file_handling": "skip",
     "use_gst_parameters": False,
     "use_model_tuning": False,
-    "use_tmdb": False,
+    "use_tmdb": True,
     "tmdb_concurrent_requests": 3,
     "tmdb_request_timeout": 10,
     "tmdb_cache_expiry_days": 365,
@@ -2454,7 +2454,7 @@ class SettingsDialog(CustomFramelessDialog):
             if key in self.model_checkboxes:
                 self.model_checkboxes[key].setChecked(default_val)
         
-        self.tmdb_checkbox.setChecked(False)
+        self.tmdb_checkbox.setChecked(True)
         self.concurrent_requests_spin.setValue(3)
         self.request_timeout_spin.setValue(10)
         self.auto_cleanup_checkbox.setChecked(True)
