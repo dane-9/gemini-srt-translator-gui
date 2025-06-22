@@ -5109,11 +5109,11 @@ class MainWindow(FramelessWidget):
         is_adding_files = self.file_adder_thread is not None and self.file_adder_thread[0].isRunning()
         
         has_any_tasks = self.model.rowCount() > 0
-
+    
         has_tmdb_operations = bool(self.tmdb_lookup_workers) or bool(self.tmdb_queue)
         
         is_validating = any(v == 'validating' for v in self.validation_states.values())
-
+    
         if self.stop_after_current_task and is_processing:
             self.start_stop_btn.setText("Force Cancel Current Language")
             self.start_stop_btn.setEnabled(True)
@@ -5148,12 +5148,12 @@ class MainWindow(FramelessWidget):
                 self.start_stop_btn.setText("Start Translating")
                 self.start_stop_btn.setEnabled(has_work_remaining)
         
-        is_busy = is_processing or self.is_running or has_tmdb_operations or is_validating or is_adding_files
+        is_busy_for_other_buttons = is_processing or self.is_running or has_tmdb_operations or is_adding_files
         
-        self.add_btn.setEnabled(not is_busy)
-        self.clear_btn.setEnabled(has_any_tasks and not is_busy)
-        self.custom_title_bar.language_selection_btn.setEnabled(not is_busy)
-        self.custom_title_bar.settings_btn.setEnabled(not is_busy)
+        self.add_btn.setEnabled(not is_busy_for_other_buttons)
+        self.clear_btn.setEnabled(has_any_tasks and not is_busy_for_other_buttons)
+        self.custom_title_bar.language_selection_btn.setEnabled(not is_busy_for_other_buttons)
+        self.custom_title_bar.settings_btn.setEnabled(not is_busy_for_other_buttons)
         
     def _get_language_names_from_codes(self, lang_codes):
         unique_codes = list(dict.fromkeys(lang_codes))
