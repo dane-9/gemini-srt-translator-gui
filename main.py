@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate, QStyleOptionViewItem
 )
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QKeySequence, QFont, QPixmap, QPainter, QLinearGradient, QColor, QPen, QFontMetrics
-from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QTimer, QItemSelectionModel, QRect, QModelIndex
+from PySide6.QtCore import Qt, QThread, Slot, QObject, Signal, QTimer, QItemSelectionModel, QRect, QModelIndex, QBuffer
 from window import FramelessWidget
 
 PathRole = Qt.UserRole + 1
@@ -137,7 +137,7 @@ def load_stylesheet():
             qss = qss.replace("QComboBox::drop-down {", 
                             f"QComboBox::drop-down {{ image: url({dropdown_svg_path});")
             
-            qss += f"""QComboBox::down-arrow {{ image: url({dropdown_svg_path}); width: 24px; height: 24px; }}"""
+            qss += f"""QComboBox::down-arrow {{ image: url({dropdown_svg_path}); width: 16px; height: 16px; }}"""
             
             # Spinbox up arrow
             arrow_up_svg_path = get_resource_path("Files/arrow-up.svg").replace("\\", "/")
@@ -4092,6 +4092,145 @@ class ModelSelectionDialog(CustomFramelessDialog):
     
     def get_selected_model(self):
         return self.selected_model
+        
+class CollapsibleConfigPanel(QWidget):
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        self.is_expanded = False
+        self.setup_ui()
+        
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.header_widget = QWidget()
+        self.header_widget.setFixedHeight(16)
+        header_layout = QHBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(10, 0, 6, 0)
+        
+        self.status_label = QLabel()
+        header_layout.addWidget(self.status_label)
+        
+        header_layout.addStretch()
+        
+        self.chevron_btn = QToolButton()
+        self.chevron_btn.setIcon(load_svg(get_resource_path("Files/dropdown-left.svg"), "#A0A0A0"))
+        self.chevron_btn.setFixedSize(16, 16)
+        self.chevron_btn.clicked.connect(self.toggle_expanded)
+        self.chevron_btn.setStyleSheet("QToolButton { border: none; background: transparent; }")
+        header_layout.addWidget(self.chevron_btn)
+        
+        layout.addWidget(self.header_widget)
+        
+        self.content_widget = QWidget()
+        self.content_layout = QHBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 6, 0, 0)
+        
+        self.api_key_edit = CustomLineEdit()
+        self.api_key_edit.setPlaceholderText("Enter Gemini API Key")
+        self.api_key_edit.set_right_text("API Key 1", font_size=9, italic=False, color="#555555")
+        self.api_key_edit.setEchoMode(QLineEdit.Password)
+        self.api_key_edit.textChanged.connect(lambda: self.main_window._on_key_text_changed('gemini1'))
+        self.content_layout.addWidget(self.api_key_edit)
+        
+        self.api_key2_edit = CustomLineEdit()
+        self.api_key2_edit.setPlaceholderText("Enter Gemini API Key (optional)")
+        self.api_key2_edit.set_right_text("API Key 2", font_size=9, italic=False, color="#555555")
+        self.api_key2_edit.setEchoMode(QLineEdit.Password)
+        self.api_key2_edit.textChanged.connect(lambda: self.main_window._on_key_text_changed('gemini2'))
+        self.content_layout.addWidget(self.api_key2_edit)
+        
+        self.tmdb_api_key_edit = CustomLineEdit()
+        self.tmdb_api_key_edit.setPlaceholderText("Enter TMDB API Key")
+        self.tmdb_api_key_edit.set_right_text("TMDB API Key", font_size=9, italic=False, color="#555555")
+        self.tmdb_api_key_edit.setEchoMode(QLineEdit.Password)
+        self.tmdb_api_key_edit.textChanged.connect(lambda: self.main_window._on_key_text_changed('tmdb'))
+        self.content_layout.addWidget(self.tmdb_api_key_edit)
+        
+        self.model_combo = QComboBox()
+        self.model_combo.currentTextChanged.connect(self.main_window.on_model_changed)
+        self.content_layout.addWidget(self.model_combo)
+        
+        layout.addWidget(self.content_widget)
+        
+        self.content_widget.setVisible(False)
+        
+    def toggle_expanded(self):
+        self.is_expanded = not self.is_expanded
+        self.content_widget.setVisible(self.is_expanded)
+        
+        if self.is_expanded:
+            self.chevron_btn.setIcon(load_svg(get_resource_path("Files/dropdown.svg")))
+        else:
+            self.chevron_btn.setIcon(load_svg(get_resource_path("Files/dropdown-left.svg")))
+            
+    def expand(self):
+        if not self.is_expanded:
+            self.toggle_expanded()
+            
+    def collapse(self):
+        if self.is_expanded:
+            self.toggle_expanded()
+            
+    def should_auto_expand(self):
+        return not self.api_key_edit.text().strip()
+        
+    def update_status_display(self):
+        validation_states = self.main_window.validation_states
+        
+        key1_icon = self.get_key_icon(validation_states.get('gemini1', 'unvalidated'))
+        key2_icon = self.get_key_icon(validation_states.get('gemini2', 'unvalidated'))
+        tmdb_icon = self.get_key_icon(validation_states.get('tmdb', 'unvalidated'))
+        
+        model_name = self.main_window.settings.get("model_name", "gemini-2.5-flash")
+        
+        status_html = f'Gemini API: {key1_icon} {key2_icon} │ TMDB API: {tmdb_icon} │ Model: {model_name}'
+        self.status_label.setText(status_html)
+        
+    def get_key_icon(self, state):
+        color_map = {
+            'valid': '#4CAF50',
+            'invalid': '#F44336', 
+            'validating': '#2196F3',
+            'unvalidated': '#A0A0A0'
+        }
+        
+        color = color_map.get(state, '#A0A0A0')
+        
+        try:
+            key_svg_path = get_resource_path("Files/key.svg")
+            with open(key_svg_path, 'r', encoding='utf-8') as f:
+                svg_content = f.read()
+            
+            svg_content = re.sub(r'<path\s+d=', f'<path fill="{color}" d=', svg_content)
+            svg_content = re.sub(r'<path\s+fill="[^"]*"\s+d=', f'<path fill="{color}" d=', svg_content)
+            
+            svg_bytes = svg_content.encode('utf-8')
+            pixmap = QPixmap()
+            pixmap.loadFromData(svg_bytes, 'SVG')
+            
+            device_ratio = 2.0
+            high_res_size = int(16 * device_ratio)
+            
+            scaled_pixmap = pixmap.scaled(
+                high_res_size, high_res_size, 
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            scaled_pixmap.setDevicePixelRatio(device_ratio)
+            
+            buffer = QBuffer()
+            buffer.open(QBuffer.WriteOnly)
+            scaled_pixmap.save(buffer, "PNG")
+            
+            import base64
+            img_data = base64.b64encode(buffer.data()).decode()
+            
+            return f'<img src="data:image/png;base64,{img_data}" width="12" height="12">'
+            
+        except Exception:
+            return f'<span style="color: {color};">🔑</span>'
 
 class MainWindow(FramelessWidget):
     def __init__(self):
@@ -4161,42 +4300,29 @@ class MainWindow(FramelessWidget):
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(6, 6, 6, 6)
         
-        config_layout = QFormLayout()
-    
-        api_keys_model_layout = QHBoxLayout()
+        self._setup_api_key_validation()
         
-        self.api_key_edit = CustomLineEdit()
-        self.api_key_edit.setPlaceholderText("Enter Gemini API Key")
-        self.api_key_edit.set_right_text("API Key 1", font_size=9, italic=False, color="#555555")
-        self.api_key_edit.setEchoMode(QLineEdit.Password)
-        self.api_key_edit.setText(self.settings.get("gemini_api_key", ""))
-        self.api_key_edit.textChanged.connect(lambda: self._on_key_text_changed('gemini1'))
-        api_keys_model_layout.addWidget(self.api_key_edit)
+        self.config_panel = CollapsibleConfigPanel(self)
+        content_layout.addWidget(self.config_panel)
         
-        self.api_key2_edit = CustomLineEdit()
-        self.api_key2_edit.setPlaceholderText("Enter Gemini API Key (optional)")
-        self.api_key2_edit.set_right_text("API Key 2", font_size=9, italic=False, color="#555555")
-        self.api_key2_edit.setEchoMode(QLineEdit.Password)
-        self.api_key2_edit.setText(self.settings.get("gemini_api_key2", ""))
-        self.api_key2_edit.textChanged.connect(lambda: self._on_key_text_changed('gemini2'))
-        api_keys_model_layout.addWidget(self.api_key2_edit)
+        self.config_panel.api_key_edit.blockSignals(True)
+        self.config_panel.api_key2_edit.blockSignals(True)
+        self.config_panel.tmdb_api_key_edit.blockSignals(True)
         
-        self.tmdb_api_key_edit = CustomLineEdit()
-        self.tmdb_api_key_edit.setPlaceholderText("Enter TMDB API Key (optional)")
-        self.tmdb_api_key_edit.set_right_text("TMDB API Key", font_size=9, italic=False, color="#555555")
-        self.tmdb_api_key_edit.setEchoMode(QLineEdit.Password)
-        self.tmdb_api_key_edit.setText(self.settings.get("tmdb_api_key", ""))
-        self.tmdb_api_key_edit.textChanged.connect(lambda: self._on_key_text_changed('tmdb'))
-        api_keys_model_layout.addWidget(self.tmdb_api_key_edit)
+        self.config_panel.api_key_edit.setText(self.settings.get("gemini_api_key", ""))
+        self.config_panel.api_key2_edit.setText(self.settings.get("gemini_api_key2", ""))
+        self.config_panel.tmdb_api_key_edit.setText(self.settings.get("tmdb_api_key", ""))
         
-        self.model_combo = QComboBox()
-        self.model_combo.currentTextChanged.connect(self.on_model_changed)
+        self.config_panel.api_key_edit.blockSignals(False)
+        self.config_panel.api_key2_edit.blockSignals(False)
+        self.config_panel.tmdb_api_key_edit.blockSignals(False)
+        
         self.populate_model_combo()
-        api_keys_model_layout.addWidget(self.model_combo)
         
-        config_layout.addRow(api_keys_model_layout)
+        if self.config_panel.should_auto_expand():
+            self.config_panel.expand()
         
-        content_layout.addLayout(config_layout)
+        self.config_panel.update_status_display()
         
         self.tree_view = QTreeView()
         self.tree_view.setAlternatingRowColors(True)
@@ -4295,7 +4421,10 @@ class MainWindow(FramelessWidget):
         
         self._sync_ui_with_queue_state()
         
-        self._setup_api_key_validation()
+        QTimer.singleShot(100, lambda: self._on_key_text_changed('gemini1'))
+        QTimer.singleShot(100, lambda: self._on_key_text_changed('gemini2'))
+        QTimer.singleShot(100, lambda: self._on_key_text_changed('tmdb'))
+        
         self.update_button_states()
 
     def _setup_api_key_validation(self):
@@ -4319,18 +4448,18 @@ class MainWindow(FramelessWidget):
 
     def _on_key_text_changed(self, key_id):
         line_edit = {
-            'gemini1': self.api_key_edit,
-            'gemini2': self.api_key2_edit,
-            'tmdb': self.tmdb_api_key_edit
+            'gemini1': self.config_panel.api_key_edit,
+            'gemini2': self.config_panel.api_key2_edit,
+            'tmdb': self.config_panel.tmdb_api_key_edit
         }.get(key_id)
 
         if not line_edit:
             return
 
         self.settings.update({
-            "gemini_api_key": self.api_key_edit.text(),
-            "gemini_api_key2": self.api_key2_edit.text(),
-            "tmdb_api_key": self.tmdb_api_key_edit.text()
+            "gemini_api_key": self.config_panel.api_key_edit.text(),
+            "gemini_api_key2": self.config_panel.api_key2_edit.text(),
+            "tmdb_api_key": self.config_panel.tmdb_api_key_edit.text()
         })
         
         if self.validation_states.get(key_id) != 'unvalidated':
@@ -4344,9 +4473,9 @@ class MainWindow(FramelessWidget):
             return
 
         line_edit = {
-            'gemini1': self.api_key_edit,
-            'gemini2': self.api_key2_edit,
-            'tmdb': self.tmdb_api_key_edit
+            'gemini1': self.config_panel.api_key_edit,
+            'gemini2': self.config_panel.api_key2_edit,
+            'tmdb': self.config_panel.tmdb_api_key_edit
         }.get(key_id)
         
         api_key = line_edit.text()
@@ -4373,20 +4502,21 @@ class MainWindow(FramelessWidget):
 
     def _on_validation_finished(self, key_id, is_valid):
         line_edit = {
-            'gemini1': self.api_key_edit,
-            'gemini2': self.api_key2_edit,
-            'tmdb': self.tmdb_api_key_edit
+            'gemini1': self.config_panel.api_key_edit,
+            'gemini2': self.config_panel.api_key2_edit,
+            'tmdb': self.config_panel.tmdb_api_key_edit
         }.get(key_id)
-
+    
         if not line_edit: return
-
-        if not line_edit.text().strip() and key_id != 'gemini1':
-            self.validation_states[key_id] = 'valid'
-            if key_id == 'gemini2':
+    
+        if not line_edit.text().strip():
+            self.validation_states[key_id] = 'unvalidated'
+            if key_id == 'gemini1':
+                line_edit.set_right_text("API Key 1", font_size=9, italic=False, color="#555555")
+            elif key_id == 'gemini2':
                 line_edit.set_right_text("API Key 2", font_size=9, italic=False, color="#555555")
             elif key_id == 'tmdb':
                 line_edit.set_right_text("TMDB API Key", font_size=9, italic=False, color="#555555")
-        
         elif is_valid:
             self.validation_states[key_id] = 'valid'
             line_edit.set_right_text("Valid", font_size=8, color="#4CAF50")
@@ -4394,6 +4524,7 @@ class MainWindow(FramelessWidget):
             self.validation_states[key_id] = 'invalid'
             line_edit.set_right_text("Invalid", font_size=8, color="#F44336")
         
+        self.config_panel.update_status_display()
         self.update_button_states()
     
     def _on_validator_thread_finished(self, key_id):
@@ -4406,13 +4537,13 @@ class MainWindow(FramelessWidget):
     def start_translation_queue(self):
         if self.validation_states['gemini1'] != 'valid':
             CustomMessageBox.warning(self, "API Key Missing or Invalid", "Please enter a valid primary Gemini API Key.")
-            self.api_key_edit.setFocus()
+            self.config_panel.api_key_edit.setFocus()
             return
         
-        if self.api_key2_edit.text().strip() and self.validation_states['gemini2'] != 'valid':
+        if self.config_panel.api_key2_edit.text().strip() and self.validation_states['gemini2'] != 'valid':
             CustomMessageBox.warning(self, "Invalid Secondary API Key", 
                                    "The secondary API key is invalid. Please verify your key or clear the field.")
-            self.api_key2_edit.setFocus()
+            self.config_panel.api_key2_edit.setFocus()
             return
                 
         if self.active_thread and self.active_thread.isRunning():
@@ -4639,7 +4770,7 @@ class MainWindow(FramelessWidget):
         edit_languages_action.triggered.connect(self.edit_selected_languages)
         menu.addAction(edit_languages_action)
         
-        if self.settings.get("use_tmdb", False) and self.tmdb_api_key_edit.text().strip():
+        if self.settings.get("use_tmdb", False) and self.config_panel.tmdb_api_key_edit.text().strip():
             menu.addSeparator()
             refresh_tmdb_action = QAction("Refresh TMDB Info", self)
             refresh_tmdb_action.triggered.connect(self.refresh_tmdb_info)
@@ -4928,9 +5059,9 @@ class MainWindow(FramelessWidget):
 
     def _save_settings(self):
         try:
-            self.settings["gemini_api_key"] = self.api_key_edit.text()
-            self.settings["gemini_api_key2"] = self.api_key2_edit.text()
-            self.settings["tmdb_api_key"] = self.tmdb_api_key_edit.text()
+            self.settings["gemini_api_key"] = self.config_panel.api_key_edit.text()
+            self.settings["gemini_api_key2"] = self.config_panel.api_key2_edit.text()
+            self.settings["tmdb_api_key"] = self.config_panel.tmdb_api_key_edit.text()
             self.settings["selected_languages"] = self.selected_languages
             
             config_dir = os.path.dirname(CONFIG_FILE)
@@ -5216,8 +5347,8 @@ class MainWindow(FramelessWidget):
             task_index=task_idx, 
             input_file_path=task_path, 
             target_languages=index.data(LanguagesRole),
-            api_key=self.api_key_edit.text().strip(), 
-            api_key2=self.api_key2_edit.text().strip(),
+            api_key=self.config_panel.api_key_edit.text().strip(), 
+            api_key2=self.config_panel.api_key2_edit.text().strip(),
             model_name=self.settings.get("model_name", "gemini-2.5-flash"), 
             settings=self.settings,
             description=index.data(DescriptionRole),
@@ -5785,7 +5916,7 @@ class MainWindow(FramelessWidget):
         if not selected_rows:
             return
 
-        api_key = self.tmdb_api_key_edit.text().strip()
+        api_key = self.config_panel.tmdb_api_key_edit.text().strip()
         if not api_key:
             return
         
@@ -5795,7 +5926,7 @@ class MainWindow(FramelessWidget):
         self._process_tmdb_queue()
     
     def _start_tmdb_lookup(self, task_index, force=False):
-        api_key = self.tmdb_api_key_edit.text().strip()
+        api_key = self.config_panel.tmdb_api_key_edit.text().strip()
         use_tmdb = self.settings.get("use_tmdb", False)
 
         if not api_key or not use_tmdb:
@@ -5823,7 +5954,7 @@ class MainWindow(FramelessWidget):
             if task_id in self.tmdb_lookup_workers:
                 continue
             
-            api_key = self.tmdb_api_key_edit.text().strip()
+            api_key = self.config_panel.tmdb_api_key_edit.text().strip()
             if not api_key:
                 continue
                 
@@ -6023,8 +6154,8 @@ class MainWindow(FramelessWidget):
             super().dropEvent(event)
             
     def populate_model_combo(self):
-        self.model_combo.blockSignals(True)
-        self.model_combo.clear()
+        self.config_panel.model_combo.blockSignals(True)
+        self.config_panel.model_combo.clear()
         
         recommended_models = [
             "gemini-2.5-flash",
@@ -6036,21 +6167,21 @@ class MainWindow(FramelessWidget):
         custom_model = self.settings.get("custom_model_name", "")
         
         for model in recommended_models:
-            self.model_combo.addItem(model)
+            self.config_panel.model_combo.addItem(model)
         
         if custom_model and custom_model not in recommended_models:
-            self.model_combo.addItem(custom_model)
+            self.config_panel.model_combo.addItem(custom_model)
         
-        self.model_combo.addItem("Show All Models...")
+        self.config_panel.model_combo.addItem("Show All Models...")
         
-        if current_model in [self.model_combo.itemText(i) for i in range(self.model_combo.count())]:
-            index = self.model_combo.findText(current_model)
+        if current_model in [self.config_panel.model_combo.itemText(i) for i in range(self.config_panel.model_combo.count())]:
+            index = self.config_panel.model_combo.findText(current_model)
             if index >= 0:
-                self.model_combo.setCurrentIndex(index)
+                self.config_panel.model_combo.setCurrentIndex(index)
         else:
-            self.model_combo.setCurrentIndex(0)
+            self.config_panel.model_combo.setCurrentIndex(0)
         
-        self.model_combo.blockSignals(False)
+        self.config_panel.model_combo.blockSignals(False)
     
     def on_model_changed(self, model_name):
         if model_name == "Show All Models...":
@@ -6062,9 +6193,9 @@ class MainWindow(FramelessWidget):
     
     def open_model_selection_dialog(self):
         current_model = self.settings.get("model_name", "gemini-2.5-flash")
-        api_key = self.api_key_edit.text().strip()
+        api_key = self.config_panel.api_key_edit.text().strip()
         
-        previous_index = self.model_combo.currentIndex()
+        previous_index = self.config_panel.model_combo.currentIndex()
         
         dialog = ModelSelectionDialog(current_model, api_key, self)
         if dialog.exec():
@@ -6072,9 +6203,9 @@ class MainWindow(FramelessWidget):
             if selected_model:
                 self.update_model_selection(selected_model)
         else:
-            self.model_combo.blockSignals(True)
-            self.model_combo.setCurrentIndex(previous_index)
-            self.model_combo.blockSignals(False)
+            self.config_panel.model_combo.blockSignals(True)
+            self.config_panel.model_combo.setCurrentIndex(previous_index)
+            self.config_panel.model_combo.blockSignals(False)
     
     def update_model_selection(self, model_name):
         recommended_models = [
