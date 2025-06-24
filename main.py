@@ -4106,9 +4106,9 @@ class CollapsibleConfigPanel(QWidget):
         layout.setSpacing(0)
         
         self.header_widget = QWidget()
-        self.header_widget.setFixedHeight(16)
+        self.header_widget.setFixedHeight(18)
         header_layout = QHBoxLayout(self.header_widget)
-        header_layout.setContentsMargins(10, 0, 6, 0)
+        header_layout.setContentsMargins(8, 0, 4, 2)
         
         self.status_label = QLabel()
         header_layout.addWidget(self.status_label)
@@ -4117,7 +4117,7 @@ class CollapsibleConfigPanel(QWidget):
         
         self.chevron_btn = QToolButton()
         self.chevron_btn.setIcon(load_svg(get_resource_path("Files/dropdown-left.svg"), "#A0A0A0"))
-        self.chevron_btn.setFixedSize(16, 16)
+        self.chevron_btn.setFixedSize(12, 12)
         self.chevron_btn.clicked.connect(self.toggle_expanded)
         self.chevron_btn.setStyleSheet("QToolButton { border: none; background: transparent; }")
         header_layout.addWidget(self.chevron_btn)
@@ -4126,12 +4126,14 @@ class CollapsibleConfigPanel(QWidget):
         
         self.content_widget = QWidget()
         self.content_layout = QHBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(0, 6, 0, 0)
+        self.content_layout.setContentsMargins(0, 2, 0, 6)
+        self.content_layout.setSpacing(6)
         
         self.api_key_edit = CustomLineEdit()
         self.api_key_edit.setPlaceholderText("Enter Gemini API Key")
         self.api_key_edit.set_right_text("API Key 1", font_size=9, italic=False, color="#555555")
         self.api_key_edit.setEchoMode(QLineEdit.Password)
+        self.api_key_edit.setFixedHeight(28)
         self.api_key_edit.textChanged.connect(lambda: self.main_window._on_key_text_changed('gemini1'))
         self.content_layout.addWidget(self.api_key_edit)
         
@@ -4139,6 +4141,7 @@ class CollapsibleConfigPanel(QWidget):
         self.api_key2_edit.setPlaceholderText("Enter Gemini API Key (optional)")
         self.api_key2_edit.set_right_text("API Key 2", font_size=9, italic=False, color="#555555")
         self.api_key2_edit.setEchoMode(QLineEdit.Password)
+        self.api_key2_edit.setFixedHeight(28)
         self.api_key2_edit.textChanged.connect(lambda: self.main_window._on_key_text_changed('gemini2'))
         self.content_layout.addWidget(self.api_key2_edit)
         
@@ -4146,10 +4149,12 @@ class CollapsibleConfigPanel(QWidget):
         self.tmdb_api_key_edit.setPlaceholderText("Enter TMDB API Key")
         self.tmdb_api_key_edit.set_right_text("TMDB API Key", font_size=9, italic=False, color="#555555")
         self.tmdb_api_key_edit.setEchoMode(QLineEdit.Password)
+        self.tmdb_api_key_edit.setFixedHeight(28)
         self.tmdb_api_key_edit.textChanged.connect(lambda: self.main_window._on_key_text_changed('tmdb'))
         self.content_layout.addWidget(self.tmdb_api_key_edit)
         
         self.model_combo = QComboBox()
+        self.model_combo.setFixedHeight(28)
         self.model_combo.currentTextChanged.connect(self.main_window.on_model_changed)
         self.content_layout.addWidget(self.model_combo)
         
@@ -4277,6 +4282,26 @@ class MainWindow(FramelessWidget):
         self.tmdb_lookup_workers = {}
         self.tmdb_threads = {}
         
+        self._setup_title_bar()
+        self._setup_main_layout()
+        self._setup_api_key_validation()
+        self._initialize_components()
+        
+        queue_state_file = get_persistent_path(os.path.join("Files", "queue_state.json"))
+        self.queue_manager = QueueStateManager(queue_state_file)
+        
+        tmdb_cache_file = get_persistent_path(os.path.join("Files", "tmdb_cache.json"))
+        self.tmdb_cache = TMDBCacheManager(tmdb_cache_file, self.settings)
+        
+        self._sync_ui_with_queue_state()
+        
+        QTimer.singleShot(100, lambda: self._on_key_text_changed('gemini1'))
+        QTimer.singleShot(100, lambda: self._on_key_text_changed('gemini2'))
+        QTimer.singleShot(100, lambda: self._on_key_text_changed('tmdb'))
+        
+        self.update_button_states()
+
+    def _setup_title_bar(self):
         title_bar = self.getTitleBar()
         title_bar.setTitleBarFont(QFont('Arial', 12))
         title_bar.setIconSize(24, 24)
@@ -4293,17 +4318,46 @@ class MainWindow(FramelessWidget):
         
         self.custom_title_bar.settings_btn.clicked.connect(self.open_settings_dialog)
         self.custom_title_bar.language_selection_btn.clicked.connect(self.open_language_selection)
-        
+
+    def _setup_main_layout(self):
         main_layout = self.layout()
         
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
-        content_layout.setContentsMargins(6, 6, 6, 6)
+        content_layout.setContentsMargins(6, 2, 6, 6)
+        content_layout.setSpacing(0)
         
-        self._setup_api_key_validation()
+        self.config_container = QWidget()
+        config_container_layout = QVBoxLayout(self.config_container)
+        config_container_layout.setContentsMargins(0, 0, 0, 0)
+        config_container_layout.setSpacing(0)
         
+        self.tree_container = QWidget()
+        tree_container_layout = QVBoxLayout(self.tree_container)
+        tree_container_layout.setContentsMargins(0, 0, 0, 0)
+        tree_container_layout.setSpacing(0)
+        
+        self.progress_container = QWidget()
+        progress_container_layout = QVBoxLayout(self.progress_container)
+        progress_container_layout.setContentsMargins(0, 3, 0, 0)
+        progress_container_layout.setSpacing(0)
+        
+        self.controls_container = QWidget()
+        controls_container_layout = QVBoxLayout(self.controls_container)
+        controls_container_layout.setContentsMargins(0, 3, 0, 0)
+        controls_container_layout.setSpacing(0)
+        
+        content_layout.addWidget(self.config_container)
+        content_layout.addWidget(self.tree_container, 1)
+        content_layout.addWidget(self.progress_container)
+        content_layout.addWidget(self.controls_container)
+        
+        main_layout.addWidget(content_widget)
+
+    def _initialize_components(self):
         self.config_panel = CollapsibleConfigPanel(self)
-        content_layout.addWidget(self.config_panel)
+        config_container_layout = self.config_container.layout()
+        config_container_layout.addWidget(self.config_panel)
         
         self.config_panel.api_key_edit.blockSignals(True)
         self.config_panel.api_key2_edit.blockSignals(True)
@@ -4323,6 +4377,13 @@ class MainWindow(FramelessWidget):
             self.config_panel.expand()
         
         self.config_panel.update_status_display()
+        
+        self._setup_tree_view()
+        self._setup_progress_bar()
+        self._setup_controls()
+
+    def _setup_tree_view(self):
+        tree_container_layout = self.tree_container.layout()
         
         self.tree_view = QTreeView()
         self.tree_view.setAlternatingRowColors(True)
@@ -4350,7 +4411,20 @@ class MainWindow(FramelessWidget):
         
         header = self.tree_view.header()
         
-        content_layout.addWidget(self.tree_view)
+        tree_container_layout.addWidget(self.tree_view)
+
+    def _setup_progress_bar(self):
+        progress_container_layout = self.progress_container.layout()
+        
+        self.overall_progress_bar = QProgressBar()
+        self.overall_progress_bar.setTextVisible(True)
+        self.overall_progress_bar.setFormat("%p% - Current Task")
+        self.overall_progress_bar.setVisible(False)
+        
+        progress_container_layout.addWidget(self.overall_progress_bar)
+
+    def _setup_controls(self):
+        controls_container_layout = self.controls_container.layout()
         
         controls_widget = QWidget()
         controls_widget.setFixedHeight(30)
@@ -4398,34 +4472,11 @@ class MainWindow(FramelessWidget):
         button_layout.addWidget(self.clear_btn)
         
         controls_layout.addWidget(button_group)
-        
         controls_layout.addStretch()
         
         self.selected_languages = self.settings.get("selected_languages", ["en"])
         
-        self.overall_progress_bar = QProgressBar()
-        self.overall_progress_bar.setTextVisible(True)
-        self.overall_progress_bar.setFormat("%p% - Current Task")
-        self.overall_progress_bar.setVisible(False)
-        content_layout.addWidget(self.overall_progress_bar)
-        
-        content_layout.addWidget(controls_widget)
-        
-        main_layout.addWidget(content_widget)
-        
-        queue_state_file = get_persistent_path(os.path.join("Files", "queue_state.json"))
-        self.queue_manager = QueueStateManager(queue_state_file)
-        
-        tmdb_cache_file = get_persistent_path(os.path.join("Files", "tmdb_cache.json"))
-        self.tmdb_cache = TMDBCacheManager(tmdb_cache_file, self.settings)
-        
-        self._sync_ui_with_queue_state()
-        
-        QTimer.singleShot(100, lambda: self._on_key_text_changed('gemini1'))
-        QTimer.singleShot(100, lambda: self._on_key_text_changed('gemini2'))
-        QTimer.singleShot(100, lambda: self._on_key_text_changed('tmdb'))
-        
-        self.update_button_states()
+        controls_container_layout.addWidget(controls_widget)
 
     def _setup_api_key_validation(self):
         self.validation_states = {
