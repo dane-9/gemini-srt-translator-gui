@@ -4093,6 +4093,16 @@ class ModelSelectionDialog(CustomFramelessDialog):
     def get_selected_model(self):
         return self.selected_model
         
+class ClickableHeaderWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_panel = parent
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.parent_panel:
+            self.parent_panel.toggle_expanded()
+        super().mousePressEvent(event)
+        
 class CollapsibleConfigPanel(QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -4105,7 +4115,7 @@ class CollapsibleConfigPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        self.header_widget = QWidget()
+        self.header_widget = ClickableHeaderWidget(self)
         self.header_widget.setFixedHeight(18)
         header_layout = QHBoxLayout(self.header_widget)
         header_layout.setContentsMargins(8, 0, 4, 2)
