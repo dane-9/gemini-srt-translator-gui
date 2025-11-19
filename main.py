@@ -180,7 +180,7 @@ DEFAULT_SETTINGS = {
     "tmdb_api_key": "",
     "target_language": "English",
     "selected_languages": ["en"],
-    "model_name": "gemini-2.5-flash",
+    "model_name": "gemini-flash-lite-latest",
     "custom_model_name": "",
     "output_file_naming_pattern": "{original_name}.{lang_code}.{modifiers}.srt",
     "update_existing_queue_languages": False,
@@ -664,7 +664,7 @@ class APIKeyValidator(QObject):
             elif self.key_id.startswith('gemini'):
                 from google import genai
                 client = genai.Client(api_key=self.api_key)
-                client.models.count_tokens(model="gemini-2.5-flash-lite-preview-06-17", contents="test")
+                client.models.count_tokens(model="gemini-flash-latest", contents="test")
                 is_valid = True
             elif self.key_id == 'tmdb':
                 is_valid = _validate_tmdb_api_key(self.api_key)
@@ -4062,9 +4062,10 @@ class ModelSelectionDialog(CustomFramelessDialog):
     
     def add_fallback_models(self):
         fallback_models = [
-            "gemini-1.5-pro-latest", "gemini-1.5-pro", "gemini-1.5-flash-latest", 
-            "gemini-1.5-flash", "gemini-2.5-pro", "gemini-2.5-flash",
-            "gemini-2.5-flash-lite-preview-06-17", "gemini-2.0-flash", "gemini-2.0-pro-exp"
+            "gemini-3-pro-preview", 
+            "gemini-2.5-pro", 
+            "gemini-flash-latest", 
+            "gemini-flash-lite-latest"
         ]
         
         for model in fallback_models:
@@ -5411,7 +5412,7 @@ class MainWindow(FramelessWidget):
             target_languages=index.data(LanguagesRole),
             api_key=self.config_panel.api_key_edit.text().strip(), 
             api_key2=self.config_panel.api_key2_edit.text().strip(),
-            model_name=self.settings.get("model_name", "gemini-2.5-flash"), 
+            model_name=self.settings.get("model_name", "gemini-flash-lite-latest"), 
             settings=self.settings,
             description=index.data(DescriptionRole),
             queue_manager=self.queue_manager,
@@ -6220,9 +6221,10 @@ class MainWindow(FramelessWidget):
         self.config_panel.model_combo.clear()
         
         recommended_models = [
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite-preview-06-17", 
-            "gemini-2.5-pro"
+            "gemini-3-pro-preview",
+            "gemini-2.5-pro",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest"
         ]
         
         current_model = self.settings.get("model_name", "gemini-2.5-flash")
@@ -6254,7 +6256,7 @@ class MainWindow(FramelessWidget):
         self._save_settings()
     
     def open_model_selection_dialog(self):
-        current_model = self.settings.get("model_name", "gemini-2.5-flash")
+        current_model = self.settings.get("model_name", "gemini-flash-lite-lates")
         api_key = self.config_panel.api_key_edit.text().strip()
         
         previous_index = self.config_panel.model_combo.currentIndex()
@@ -6271,9 +6273,10 @@ class MainWindow(FramelessWidget):
     
     def update_model_selection(self, model_name):
         recommended_models = [
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite-preview-06-17", 
-            "gemini-2.5-pro"
+            "gemini-3-pro-preview",
+            "gemini-2.5-pro",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest"
         ]
         
         if model_name in recommended_models:
