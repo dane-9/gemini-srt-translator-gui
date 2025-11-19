@@ -668,7 +668,8 @@ class APIKeyValidator(QObject):
                 is_valid = True
             elif self.key_id == 'tmdb':
                 is_valid = _validate_tmdb_api_key(self.api_key)
-        except Exception:
+        except Exception as e:
+            print(f"DEBUG - Validation Failed: {e}")
             is_valid = False
         finally:
             self.validation_finished.emit(self.key_id, is_valid)
