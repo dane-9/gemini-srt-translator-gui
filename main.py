@@ -182,6 +182,7 @@ DEFAULT_SETTINGS = {
     "selected_languages": ["en"],
     "model_name": "gemini-flash-lite-latest",
     "custom_model_name": "",
+    "validation_model": "gemini-flash-lite-latest", 
     "output_file_naming_pattern": "{original_name}.{lang_code}.{modifiers}.srt",
     "update_existing_queue_languages": False,
     "queue_on_exit": "clear_if_translated",
@@ -651,10 +652,11 @@ class IconTextDelegate(QStyledItemDelegate):
 class APIKeyValidator(QObject):
     validation_finished = Signal(str, bool)
 
-    def __init__(self, key_id, api_key):
+    def __init__(self, key_id, api_key, validation_model="gemini-flash-lite-latest"):
         super().__init__()
         self.key_id = key_id
         self.api_key = api_key.strip()
+        self.validation_model = validation_model
 
     def run(self):
         is_valid = False
@@ -664,12 +666,11 @@ class APIKeyValidator(QObject):
             elif self.key_id.startswith('gemini'):
                 from google import genai
                 client = genai.Client(api_key=self.api_key)
-                client.models.count_tokens(model="gemini-flash-latest", contents="test")
+                client.models.count_tokens(model=self.validation_model, contents="test")
                 is_valid = True
             elif self.key_id == 'tmdb':
                 is_valid = _validate_tmdb_api_key(self.api_key)
-        except Exception as e:
-            print(f"DEBUG - Validation Failed: {e}")
+        except Exception:
             is_valid = False
         finally:
             self.validation_finished.emit(self.key_id, is_valid)
@@ -2030,6 +2031,11 @@ class SettingsDialog(CustomFramelessDialog):
         form_layout = QFormLayout()
         form_layout.setVerticalSpacing(15)
         
+        self.validation_model_edit = QLineEdit(self.settings.get("validation_model", "gemini-flash-lite-latest"))
+        self.validation_model_edit.setPlaceholderText("e.g. gemini-flash-lite-latest")
+        self.validation_model_edit.setToolTip("The model used to test if your API Key is valid.")
+        form_layout.addRow("API Key Validation Model:", self.validation_model_edit)
+        
         self.output_naming_pattern_edit = QLineEdit(self.settings.get("output_file_naming_pattern", "{original_name}.{lang_code}.srt"))
         form_layout.addRow("Output Naming Pattern:", self.output_naming_pattern_edit)
         
@@ -2424,6 +2430,7 @@ class SettingsDialog(CustomFramelessDialog):
         self.episode_template_display.setText(template.replace('\n', '<br>'))
     
     def reset_defaults(self):
+        self.validation_model_edit.setText("gemini-flash-lite-latest")
         self.output_naming_pattern_edit.setText("{original_name}.{lang_code}.srt")
         self.queue_on_exit_combo.setCurrentIndex(1)
         self.existing_file_combo.setCurrentIndex(0)
@@ -2493,6 +2500,7 @@ class SettingsDialog(CustomFramelessDialog):
     def get_settings(self):
         s = self.settings.copy()
         
+        s["validation_model"] = self.validation_model_edit.text().strip()
         s["output_file_naming_pattern"] = self.output_naming_pattern_edit.text().strip()
         s["queue_on_exit"] = self.queue_on_exit_combo.currentData()
         s["existing_file_handling"] = self.existing_file_combo.currentData()
@@ -4551,7 +4559,8 @@ class MainWindow(FramelessWidget):
         line_edit.set_right_text("Validating...", font_size=8, color="#888888")
         self.update_button_states()
 
-        worker = APIKeyValidator(key_id, api_key)
+        val_model = self.settings.get("validation_model", "gemini-flash-lite-latest")
+        worker = APIKeyValidator(key_id, api_key, val_model)
         thread = QThread()
         self.active_validators[key_id] = (thread, worker)
         worker.moveToThread(thread)
